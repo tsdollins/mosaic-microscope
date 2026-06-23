@@ -9,3 +9,7 @@ __pycache__/
 *.tiff
 *.jpg
 *.jpeg
+
+# ZWO ASI vendor SDK binaries — large, not source
+ScopeFoundryHW/HW_zwo_camera/ASI_Windows_SDK_V1.28/
+ScopeFoundryHW/HW_zwo_camera/ASI_linux_mac_SDK_V1.22/
