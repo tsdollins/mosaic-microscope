@@ -1,0 +1,11 @@
+data/
+log/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.h5
+*.tif
+*.tiff
+*.jpg
+*.jpeg
