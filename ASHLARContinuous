@@ -1,0 +1,103 @@
+import os
+JAVA_HOME = r"C:\Users\lab\miniconda3\envs\scopefoundry313\Library\lib\jvm"
+os.environ["JAVA_HOME"] = JAVA_HOME
+jvm_dir = os.path.join(JAVA_HOME, "bin", "server")
+os.environ["PATH"] = jvm_dir + os.pathsep + os.environ.get("PATH", "")
+try:
+    os.add_dll_directory(jvm_dir)
+except (AttributeError, FileNotFoundError):
+    pass
+
+import h5py
+import numpy as np
+from ashlar import reg
+
+H5_PATH = r"C:\Users\lab\Documents\User_Images\Default\260616_170310_continuous_motion_image.h5"
+OUT_PATH = r"C:\Users\lab\Documents\User_Images\Default\contin_mosaic2.ome.tif"
+
+# Calibration from your FOV measurement:    
+# 4944 px / 3.431 mm = 0.6940 um/px  (horizontal)
+# 3284 px / 2.3031 mm = 0.7012 um/px (vertical)
+# Ashlar uses a single isotropic pixel size; use the average.
+PIXEL_SIZE_UM = 0.6976
+
+# Stage units: set this to match coords stored in the h5.
+# If coords are in mm, this converts to um. If already in um, set to 1.0.
+COORD_UNITS_TO_UM = 1000.0   # assumes coords stored in mm
+
+H5_GROUP = "measurement/continuous_motion_image"   # adjust to your actual group name
+
+
+class H5StackMetadata(reg.Metadata):
+    def __init__(self, positions_um, th, tw, pixel_size):
+        # positions_um: (N, 2) array of [y, x] in microns
+        self._positions_um = positions_um
+        self.th, self.tw = th, tw
+        self._pixel_size = pixel_size
+
+    @property
+    def _num_images(self):
+        return len(self._positions_um)
+
+    @property
+    def num_channels(self):
+        return 1
+
+    @property
+    def pixel_size(self):
+        return self._pixel_size
+
+    @property
+    def pixel_dtype(self):
+        return np.uint8
+
+    def tile_size(self, i):
+        return np.array([self.th, self.tw])
+
+    def tile_position(self, i):
+        # position is [y, x] in PIXELS
+        return self._positions_um[i] / self._pixel_size
+
+
+class H5StackReader(reg.Reader):
+    def __init__(self, path, group, pixel_size, coord_units_to_um):
+        self.path = path
+        self.f = h5py.File(path, "r")
+        self.imgs = self.f[f"{group}/live_img_map"]   # (N, th, tw)
+        coords = self.f[f"{group}/coords"][:]         # (N, 2) -> (x, y) in stage units
+
+        N, th, tw = self.imgs.shape[:3]
+
+        # coords stored as (x, y); Ashlar wants [y, x]. Convert to um.
+        x_um = coords[:, 0] * coord_units_to_um
+        y_um = coords[:, 1] * coord_units_to_um
+
+        # Shift to a non-negative origin
+        x_um = x_um - x_um.min()
+        y_um = y_um - y_um.min()
+
+        positions_um = np.column_stack([y_um, x_um]).astype(float)
+
+        self.metadata = H5StackMetadata(positions_um, th, tw, pixel_size)
+
+    def read(self, series, c):
+        tile = self.imgs[series, :, :]
+        return np.ascontiguousarray(tile[:, ::-1])   # horizontal flip
+
+
+reader = H5StackReader(H5_PATH, H5_GROUP, PIXEL_SIZE_UM, COORD_UNITS_TO_UM)
+
+# geometry sanity check before alignment
+N = reader.metadata._num_images
+print("num tiles:", N)
+print("tile size (px):", reader.metadata.tile_size(0))
+pos = reader.metadata._positions_um / reader.metadata.pixel_size
+print("tile position range (px): y[{:.1f}, {:.1f}]  x[{:.1f}, {:.1f}]".format(
+    pos[:, 0].min(), pos[:, 0].max(), pos[:, 1].min(), pos[:, 1].max()))
+
+aligner = reg.EdgeAligner(reader, channel=0, max_shift=20, verbose=True)
+aligner.run()
+
+mosaic = reg.Mosaic(aligner, aligner.mosaic_shape, verbose=True)
+writer = reg.PyramidWriter([mosaic], OUT_PATH, tile_size=1024, verbose=True)
+writer.run()

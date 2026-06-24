@@ -8,7 +8,7 @@ from ScopeFoundryHW.HW_prior_stage.prior_stage_raster import PriorStage2DScan
 class SimpleTiledImage(PriorStage2DScan):
 
     name = 'simple_tiled_image'
-
+    # 2.288 x 1.35
     def pre_scan_setup(self):
         cam = self.app.hardware['zwo_camera']
         cam.start_video_capture()
@@ -18,9 +18,15 @@ class SimpleTiledImage(PriorStage2DScan):
         cam.stop_video_capture()
 
     def collect_pixel(self, pixel_num, k, j, i):
-        time.sleep(0.75)  # allow stage to settle after move_position_fast
+        # Block until the stage has finished moving so the frame is captured
+        # while the stage is stationary (no motion during acquisition).
+        while self.stage.is_busy_xy():
+            time.sleep(0.01)
+        time.sleep(1.5)  # allow mechanical vibration to settle after motion stops
 
         cam = self.app.hardware['zwo_camera']
+        # Discard frames exposed while the stage was moving, then grab a fresh
+        # one exposed now that the stage is stationary.
         live_img = cam.capture_video_frame()
 
         self.display_image_map[k, j, i] = live_img.sum()

@@ -18,3 +18,9 @@
 
  - *dark_mode*: <i>Unknown</i> let the operating system decide
 
+ - *overlap*: Percent overlap between adjacent tiles
+
+ - *panel_height*: None
+
+ - *panel_width*: None
+
