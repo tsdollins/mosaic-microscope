@@ -138,6 +138,9 @@ class ZWOCameraHW(HardwareComponent):
                 lq = S.get_lq(pc['Name'])
                 print(f"Possible Control {pc['Name']} not in current camera controls")
                 lq.change_readonly(True)
+        # Fixed centered ROI to match the illuminated area (unbinned sensor px).
+        # width % 8 == 0, height % 2 == 0; start_x/start_y omitted -> auto-center.
+        self.camera.set_roi(width=3584, height=3584)
             
     def disconnect(self):
         self.settings.disconnect_all_from_hardware()
@@ -189,7 +192,35 @@ class ZWOCameraHW(HardwareComponent):
             if timeout is None:
                 return self.camera.capture_video_frame()
             return self.camera.capture_video_frame(timeout=timeout)
-    
+
+    def capture_fresh_frame(self, drain_timeout_ms=50):
+        """Return a freshly-exposed frame, discarding any stale buffered frames.
+
+        In video mode the camera continuously exposes and queues frames (FIFO).
+        After the stage stops moving the queue can still hold blurred frames that
+        were exposed while it was in motion. This drains everything already
+        queued, then waits for the next frame -- which is exposed entirely after
+        the drain, i.e. while the stage is stationary.
+
+        Call only after the stage has stopped (and settled). Requires video
+        capture to be running. The whole drain+grab is done under the camera lock
+        so it is one atomic, serialized fresh capture.
+        """
+        with self._cam_lock:
+            if not self._video_capture_on:
+                raise IOError("Need to Start video to capture frame")
+
+            # Drain frames already in the buffer (exposed while the stage moved).
+            # capture_video_frame raises on timeout once the buffer is empty.
+            while True:
+                try:
+                    self.camera.capture_video_frame(timeout=drain_timeout_ms)
+                except Exception:
+                    break
+
+            # The next delivered frame is exposed after the drain -> stage stationary.
+            return self.camera.capture_video_frame()
+
     img_types = {
         'RAW8' : 0,
         'RGB24' : 1,

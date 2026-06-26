@@ -31,9 +31,9 @@ class MicroscopeApp(BaseMicroscopeApp):
         self.settings.New("overlap", dtype=float, ro=False, spinbox_step=5,
                           description="Percent overlap between adjacent tiles")
         self.settings.New("panel_height", dtype=float, ro=False, unit="mm",
-                          spinbox_decimals=4, initial=2.288)
+                          spinbox_decimals=4, initial=2.657)
         self.settings.New("panel_width", dtype=float, ro=False, unit="mm",
-                          spinbox_decimals=4, initial=1.35)
+                          spinbox_decimals=4, initial=2.657)
 
         self.settings_load_ini('microscope_defaults.ini')
 
