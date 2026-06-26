@@ -12,8 +12,8 @@ import h5py
 import numpy as np
 from ashlar import reg
 
-H5_PATH = r"C:\Users\lab\Documents\User_Images\Default\260622_104313_simple_tiled_image_flat.h5"
-OUT_PATH = r"C:\Users\lab\Documents\User_Images\Default\mosaic.ome.tif"
+H5_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\260625_154543_simple_tiled_image.h5"
+OUT_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\mosaic.ome.tif"
 
 # --- Known quantities ---
 OVERLAP = 0.15                 # 15% overlap between adjacent frames
@@ -107,7 +107,7 @@ class H5GridReader(reg.Reader):
         else:
             tile = self.imgs[0, r, col, :, :]
 
-        return np.ascontiguousarray(tile[:, ::-1])   # horizontal flip
+        return np.ascontiguousarray(tile[::-1, ::-1])
 
 
 reader = H5GridReader(H5_PATH, OVERLAP, FRAME_W_MM, FRAME_H_MM)

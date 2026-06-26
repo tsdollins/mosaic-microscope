@@ -2,7 +2,7 @@ import h5py
 import numpy as np
 import napari
 
-H5_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\260624_130607_simple_tiled_image.h5"
+H5_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\260625_172230_simple_tiled_image.h5"
 with h5py.File(H5_PATH, "r") as f:
     imgs = f["measurement/simple_tiled_image/live_img_map"]
     shape = imgs.shape
@@ -36,10 +36,10 @@ with h5py.File(H5_PATH, "r") as f:
         for c in range(Nh):
             if nc is None:
                 tile = imgs[0, r, c, :, :]
-                tile = tile[:, ::-1]  
+                tile = tile[::-1, ::-1]   # rows = un-flip over x-axis, cols = existing y-axis flip
             else:
                 tile = imgs[0, r, c, :, :, :]
-                tile = tile[:, ::-1]  
+                tile = tile[::-1, ::-1]   # rows = un-flip over x-axis, cols = existing y-axis flip
             y = r * step_y
             x = c * step_x
             mosaic[y:y+th, x:x+tw] = tile

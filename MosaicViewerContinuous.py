@@ -39,9 +39,9 @@ print(f"Mosaic will be {H} x {W}"
 
 for i in range(N):
     if nc is None:
-        tile = stack[i][:, ::-1]
+        tile = stack[i][::-1, ::-1]
     else:
-        tile = stack[i][:, ::-1, :]
+        tile = stack[i][::-1, ::-1, :]
     y = py[i]
     x = px[i]
     mosaic[y:y+th, x:x+tw] = tile
