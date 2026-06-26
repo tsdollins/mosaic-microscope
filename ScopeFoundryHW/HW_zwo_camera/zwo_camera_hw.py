@@ -1,6 +1,7 @@
 from ScopeFoundry import HardwareComponent
 from qtpy import QtCore
 import os
+import threading
 
 class ZWOCameraHW(HardwareComponent):
     
@@ -38,8 +39,13 @@ class ZWOCameraHW(HardwareComponent):
         self.live_update_timer.timeout.connect(self.on_live_update_timer)        
         self.live_update_timer.start(100)
         S.live_update_period.add_listener(self.on_new_live_update_period)
-        
+
         self._video_capture_on = False
+        # Re-entrant lock serializing camera SDK operations that change the video
+        # stream state (start/stop/set_img_type/close) against the blocking frame
+        # grab. The ASI SDK is not safe to call these concurrently for one camera.
+        # Re-entrant because set_img_type() calls stop/start_video_capture().
+        self._cam_lock = threading.RLock()
 
     def on_new_live_update_period(self):
         #print("asdf")
@@ -136,44 +142,53 @@ class ZWOCameraHW(HardwareComponent):
     def disconnect(self):
         self.settings.disconnect_all_from_hardware()
 
-        if self._video_capture_on:
-            try:
-                self.camera.stop_video_capture()
-            except Exception:
-                pass
-            self._video_capture_on = False
+        with self._cam_lock:
+            if self._video_capture_on:
+                try:
+                    self.camera.stop_video_capture()
+                except Exception:
+                    pass
+                self._video_capture_on = False
 
-        if hasattr(self, 'camera'):
-            try:
-                self.camera.close()
-            except Exception:
-                pass
+            if hasattr(self, 'camera'):
+                try:
+                    self.camera.close()
+                except Exception:
+                    pass
     
     
     
     
     def set_img_type(self,imtype):
         type_id = self.img_types[imtype]
-        vc = self._video_capture_on
-        if vc:
-            self.stop_video_capture()
-        self.camera.set_image_type(type_id)
-        if vc:
-            self.start_video_capture()
-        
+        with self._cam_lock:
+            vc = self._video_capture_on
+            if vc:
+                self.stop_video_capture()
+            self.camera.set_image_type(type_id)
+            if vc:
+                self.start_video_capture()
+
     def start_video_capture(self):
-        self._video_capture_on = True
-        self.camera.start_video_capture()
+        with self._cam_lock:
+            self._video_capture_on = True
+            self.camera.start_video_capture()
 
     def stop_video_capture(self):
-        self.camera.stop_video_capture()
-        self._video_capture_on = False
+        with self._cam_lock:
+            self.camera.stop_video_capture()
+            self._video_capture_on = False
 
-    def capture_video_frame(self):
-        if self._video_capture_on:
-            return self.camera.capture_video_frame()
-        else:
-            raise IOError("Need to Start video to capture frame")
+    def capture_video_frame(self, timeout=None):
+        # Holds the lock for the duration of the (blocking) grab so a concurrent
+        # stop/close/set_img_type cannot tear the stream down mid-read. Callers
+        # should run this off the GUI thread (see the acquisition thread).
+        with self._cam_lock:
+            if not self._video_capture_on:
+                raise IOError("Need to Start video to capture frame")
+            if timeout is None:
+                return self.camera.capture_video_frame()
+            return self.camera.capture_video_frame(timeout=timeout)
     
     img_types = {
         'RAW8' : 0,

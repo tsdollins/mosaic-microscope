@@ -12,11 +12,19 @@ class ContinuousMotionImage(PriorStage2DScan):
 
     def pre_scan_setup(self):
         cam = self.app.hardware['zwo_camera']
+        # Pause live preview so the scan is the only camera consumer.
+        cap = self.app.measurements['zwo_camera_capture']
+        self._live_was_on = cap.settings['live_img']
+        if self._live_was_on:
+            cap._stop_live_acquisition()
         cam.start_video_capture()
 
     def post_scan_cleanup(self):
         cam = self.app.hardware['zwo_camera']
         cam.stop_video_capture()
+        cap = self.app.measurements['zwo_camera_capture']
+        if getattr(self, '_live_was_on', False):
+            cap._start_live_acquisition()
 
     def collect_pixel(self, pixel_num, dh):
         cam = self.app.hardware['zwo_camera']
