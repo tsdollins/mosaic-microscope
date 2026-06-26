@@ -9,13 +9,45 @@ class SimpleTiledImage(PriorStage2DScan):
 
     name = 'simple_tiled_image'
     # 2.288 x 1.35
+
+    def setup(self):
+        PriorStage2DScan.setup(self)
+        # PureFocus850 autofocus options (all opt-in; safe if PF850 absent).
+        self.settings.New("use_autofocus", dtype=bool, initial=False,
+                          description="Hold focus with the PureFocus850 servo "
+                                      "during the scan")
+        self.settings.New("autofocus_per_tile", dtype=bool, initial=False,
+                          description="At each tile, wait for the PF850 FOCUS "
+                                      "flag before capturing")
+        self.settings.New("autofocus_timeout", dtype=float, initial=2.0,
+                          unit="s", description="Max wait for in-focus per tile")
+
+    def _get_purefocus(self):
+        """Return the connected PureFocus850 HW, or None if unavailable."""
+        if not self.settings["use_autofocus"]:
+            return None
+        if "prior_purefocus" not in self.app.hardware:
+            return None
+        pf = self.app.hardware["prior_purefocus"]
+        return pf if pf.settings["connected"] else None
+
     def pre_scan_setup(self):
         cam = self.app.hardware['zwo_camera']
         cam.start_video_capture()
 
+        # Continuous-hold autofocus: enable the servo for the whole scan so the
+        # PF850 keeps the sample in focus as the stage steps tile to tile.
+        pf = self._get_purefocus()
+        if pf is not None:
+            pf.set_servo(True)
+
     def post_scan_cleanup(self):
         cam = self.app.hardware['zwo_camera']
         cam.stop_video_capture()
+
+        pf = self._get_purefocus()
+        if pf is not None:
+            pf.set_servo(False)
 
     def collect_pixel(self, pixel_num, k, j, i):
         # Block until the stage has finished moving so the frame is captured
@@ -23,6 +55,18 @@ class SimpleTiledImage(PriorStage2DScan):
         while self.stage.is_busy_xy():
             time.sleep(0.01)
         time.sleep(1.5)  # allow mechanical vibration to settle after motion stops
+
+        # Optional per-tile focus confirmation: wait for the PF850 to report
+        # in-focus (servo is already running from pre_scan_setup) before grabbing.
+        pf = self._get_purefocus()
+        if pf is not None and self.settings['autofocus_per_tile']:
+            t0 = time.time()
+            while not pf.is_in_focus():
+                if time.time() - t0 > self.settings['autofocus_timeout']:
+                    print(f"warning: PF850 not in focus within timeout at "
+                          f"{k},{j},{i}")
+                    break
+                time.sleep(0.02)
 
         cam = self.app.hardware['zwo_camera']
         # Discard frames exposed while the stage was moving, then grab a fresh

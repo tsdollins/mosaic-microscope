@@ -12,6 +12,12 @@ class MicroscopeApp(BaseMicroscopeApp):
         from ScopeFoundryHW.HW_prior_stage.prior_stage_hw import PriorStageHW
         self.add_hardware(PriorStageHW(self))
 
+        from ScopeFoundryHW.HW_prior_turret.prior_turret_hw import PriorTurretHW
+        self.add_hardware(PriorTurretHW(self))
+
+        from ScopeFoundryHW.HW_prior_purefocus.purefocus_hw import PureFocusHW
+        self.add_hardware(PureFocusHW(self))
+
         from ScopeFoundryHW.HW_zwo_camera.zwo_camera_hw import ZWOCameraHW
         self.add_hardware(ZWOCameraHW(self))
 
@@ -83,7 +89,14 @@ class MicroscopeApp(BaseMicroscopeApp):
         Q.snap_save_pushButton.clicked.connect(camera_capture.snap_and_save)
         # zwo_iso_comboBox, zwo_exp_comboBox, zwo_color_temp_comboBox,
         # open_last_img_pushButton, show_last_img_pushButton — not yet connected
-        # z_up/down/halt, stage_locator buttons — not yet connected
+
+        # --- Z Focus (PureFocus850) ---
+        purefocus = self.hardware['prior_purefocus']
+        purefocus.settings.z_position.connect_to_widget(Q.z_pos_doubleSpinBox)
+        purefocus.settings.z_step.connect_to_widget(Q.z_step_doubleSpinBox)
+        Q.z_up_pushButton.clicked.connect(purefocus.z_up)
+        Q.z_down_pushButton.clicked.connect(purefocus.z_down)
+        Q.z_halt_pushButton.clicked.connect(purefocus.z_halt)
 
         # --- Scan Parameters ---
         scan = self.measurements['simple_tiled_image']
@@ -93,6 +106,15 @@ class MicroscopeApp(BaseMicroscopeApp):
         self.settings.panel_height.connect_to_widget(Q.panel_height_doubleSpinBox)
         self.settings.panel_width.connect_to_widget(Q.panel_width_doubleSpinBox)
         Q.calculate_pushButton.clicked.connect(self.new_bounds)
+
+        # --- Locate XY and Locate Tile ---
+        stage.settings.new_x_target.connect_to_widget(Q.target_x_locate_doubleSpinBox)
+        stage.settings.new_y_target.connect_to_widget(Q.target_y_locate_doubleSpinBox)
+        Q.locate_target_pushButton.clicked.connect(stage.locate_xy)
+
+        stage.settings.target_j.connect_to_widget(Q.target_j_doubleSpinBox)
+        stage.settings.target_k.connect_to_widget(Q.target_k_doubleSpinBox)
+        Q.locate_tile_pushButton.clicked.connect(stage.locate_tile)
 
 
     def new_bounds(self, *args):
