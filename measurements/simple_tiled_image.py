@@ -31,12 +31,12 @@ class SimpleTiledImage(PriorStage2DScan):
         # while the stage is stationary (no motion during acquisition).
         while self.stage.is_busy_xy():
             time.sleep(0.01)
-        time.sleep(1.5)  # allow mechanical vibration to settle after motion stops
+        time.sleep(0.5)  # allow mechanical vibration to settle after motion stops
 
         cam = self.app.hardware['zwo_camera']
         # Discard frames exposed while the stage was moving, then grab a fresh
         # one exposed now that the stage is stationary.
-        live_img = cam.capture_video_frame()
+        live_img = cam.capture_fresh_frame()
 
         self.display_image_map[k, j, i] = live_img.sum()
 
