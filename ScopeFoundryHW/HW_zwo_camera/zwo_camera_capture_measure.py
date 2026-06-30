@@ -5,6 +5,55 @@ from ScopeFoundry import h5_io
 import os
 import imageio
 import numpy as np
+import threading
+
+
+class _CameraAcquisitionThread(QtCore.QThread):
+    """Grabs camera frames off the GUI thread.
+
+    The blocking ``capture_video_frame`` call runs here, so a slow/stalled frame
+    can never freeze the UI. Each grab is handed to the GUI thread for display via
+    the ``frame_ready`` signal using a drop-to-latest scheme (only the newest
+    frame is ever drawn, so display can't fall behind acquisition).
+    """
+
+    frame_ready = QtCore.Signal()
+
+    def __init__(self, measure):
+        super().__init__()
+        self.measure = measure
+        self._stop = threading.Event()
+
+    def stop(self):
+        self._stop.set()
+
+    def run(self):
+        m = self.measure
+        cam = m.app.hardware['zwo_camera']
+        while not self._stop.is_set():
+            try:
+                # moderate timeout so a stalled stream releases the camera lock
+                # and lets us back off, rather than blocking indefinitely
+                frame = cam.capture_video_frame(timeout=2000)
+            except Exception:
+                # camera not ready / stream stalled -> back off briefly and retry
+                if self._stop.wait(0.1):
+                    break
+                continue
+
+            with m._frame_lock:
+                m._latest_frame = frame
+                emit = not m._display_pending
+                m._display_pending = True
+            if emit:
+                self.frame_ready.emit()
+
+            # throttle to the configured preview period; the camera lock is FREE
+            # during this sleep so GUI control reads don't wait on us
+            period_s = max(0.0, m.settings['live_update_period'] / 1000.0)
+            if self._stop.wait(period_s):
+                break
+
 
 class ZWOCameraCaptureMeasure(Measurement):
 
@@ -22,6 +71,16 @@ class ZWOCameraCaptureMeasure(Measurement):
         self.add_operation('clear_and_plot', self.clear_and_plot)
         self.add_operation('snap_and_save', self.snap_and_save)
         self.settings.live_img.add_listener(self.on_toggle_live_img)
+
+        # Live-preview acquisition thread + drop-to-latest frame handoff
+        self._acq_thread = None
+        self._latest_frame = None
+        self._display_pending = False
+        self._frame_lock = threading.Lock()
+
+        # Stop the acquisition thread if the camera is disconnected out from under us
+        self.app.hardware['zwo_camera'].settings.connected.add_listener(
+            self._on_camera_connection_changed)
 
 
 
@@ -46,81 +105,88 @@ class ZWOCameraCaptureMeasure(Measurement):
         self.graph_layout.clear()
         self.ui_layout.addWidget(self.graph_layout, 0,1,2,1)
 
-        self.live_img_update_timer = QtCore.QTimer()
-        self.live_img_update_timer.timeout.connect(self._on_live_img_timer)
-        self.live_img_update_timer.start(self.settings['live_update_period'])
-        self.settings.live_update_period.add_listener(
-            lambda: self.live_img_update_timer.setInterval(self.settings['live_update_period']))
-
+        # Live preview is driven by the acquisition thread (see on_toggle_live_img),
+        # NOT a GUI-thread timer -- the GUI never blocks on a frame grab.
         self.ui_layout.setColumnStretch(1, 1)
         self.clear_and_plot()
 
     def on_toggle_live_img(self):
+        if self.settings['live_img']:
+            self._start_live_acquisition()
+        else:
+            self._stop_live_acquisition()
+
+    def _start_live_acquisition(self):
+        """Begin video capture and spin up the off-GUI-thread frame grabber."""
         cam = self.app.hardware['zwo_camera']
         if not hasattr(cam, 'camera'):
             return
-        if self.settings['live_img']:
-            cam.start_video_capture()
-        else:
-            cam.stop_video_capture()
-    """
-    #just overrided the run functions here to start video capture and the interrupt function
-    #to stop capture. this should support non-thread blocking video capture through the run functions multi-threading
+        if self._acq_thread is not None and self._acq_thread.isRunning():
+            return
+        cam.start_video_capture()
+        self._acq_thread = _CameraAcquisitionThread(self)
+        self._acq_thread.frame_ready.connect(self.on_frame_ready)
+        self._acq_thread.start()
 
-    def run(self):
+    def _stop_live_acquisition(self):
+        """Stop the frame grabber (join it), then stop video capture."""
+        t = self._acq_thread
+        self._acq_thread = None
+        if t is not None:
+            t.stop()
+            t.wait(3000)  # join, up to 3 s
+            try:
+                t.frame_ready.disconnect(self.on_frame_ready)
+            except Exception:
+                pass
         cam = self.app.hardware['zwo_camera']
-        cam.camera.start_video_capture()
+        if hasattr(cam, 'camera'):
+            try:
+                cam.stop_video_capture()
+            except Exception:
+                pass
 
-    def interrupt(self):
-        cam = self.app.hardware['zwo_camera']
-        cam.camera.stop_video_capture()
-    """
+    def _on_camera_connection_changed(self):
+        """If the camera disconnects, tear down the grabber thread first so it
+        never calls into a closing/closed camera."""
+        connected = self.app.hardware['zwo_camera'].settings['connected']
+        if not connected and self._acq_thread is not None:
+            t = self._acq_thread
+            self._acq_thread = None
+            t.stop()
+            t.wait(3000)
 
-    def _on_live_img_timer(self):
-        if self.settings['live_img']:
-            cam = self.app.hardware['zwo_camera']
-            im  = cam.capture_video_frame()
-            if self.settings['rotate']:
-                im = im.swapaxes(0,1)
+    def on_frame_ready(self):
+        """GUI-thread slot: draw the most recent frame (drop-to-latest)."""
+        if not hasattr(self, 'live_img_item'):
+            return
+        with self._frame_lock:
+            im = self._latest_frame
+            self._display_pending = False
+        if im is None:
+            return
 
-            if self.settings['px_bin'] >= 1:
-                stride = self.settings['px_bin']
-                im = im[::stride,::stride]
+        if self.settings['rotate']:
+            im = im.swapaxes(0, 1)
 
-            # TODO this is a fix for certain cameras returning BGR instead of RGB
-            if True:
-                if im.shape[-1] == 3:
-                    im_r  = im[:,:,2]
-                    im_g  = im[:,:,1]
-                    im_b  = im[:,:,0]
-                    im = np.stack([im_r,im_g, im_b], axis=2)
+        stride = self.settings['px_bin']
+        if stride > 1:
+            im = im[::stride, ::stride]
 
+        # Some color cameras deliver BGR; swap to RGB for display
+        if im.ndim == 3 and im.shape[-1] == 3:
+            im = np.ascontiguousarray(im[:, :, ::-1])
 
-            self.live_img_item.setImage(image=im,
-                                        autoLevels=False)
-            scale = 1
-            center_x = 50
-            center_y = 50
-            im_aspect = im.shape[1]/im.shape[0]
-            self.img_rect = pg.QtCore.QRectF(0 - center_x * scale / 100,
-                                0 - center_y * scale * im_aspect / 100,
-                                scale,
-                                scale * im_aspect)
-            self.live_img_item.setRect(self.img_rect)
-
-            #print(cam.camera.get_dropped_frames())
-                # # get rectangle
-                # im_aspect = im.shape[1]/im.shape[0]
-                # stageS = self.app.hardware["mcl_xyz_stage"].settings
-                # x,y,z =  stageS["x_position"]*1e-6, stageS["y_position"]*1e-6, stageS["z_position"]*1e-6
-                #
-                # scale = self.settings['img_scale']
-                # S = self.settings
-                # rect= pg.QtCore.QRectF(x - S['img_center_x'] * scale / 100,
-                #                         y - S['img_center_y'] * scale * im_aspect / 100,
-                #                         scale,
-                #                         scale * im_aspect)
-                # self.live_img_item.setRect(rect)
+        self.live_img_item.setImage(image=im, autoLevels=False)
+        scale = 1
+        center_x = 50
+        center_y = 50
+        im_aspect = im.shape[1] / im.shape[0]
+        self.img_rect = pg.QtCore.QRectF(0 - center_x * scale / 100,
+                            0 - center_y * scale * im_aspect / 100,
+                            scale,
+                            scale * im_aspect)
+        self.live_img_item.setRect(self.img_rect)
 
 
     def clear_and_plot(self):
@@ -143,9 +209,15 @@ class ZWOCameraCaptureMeasure(Measurement):
     def snap_and_save(self):
         print("snap_and_save")
         cam = self.app.hardware['zwo_camera']
-        cam.camera.start_video_capture()
+
+        # Pause live preview so this snap is the only camera consumer.
+        was_live = self.settings['live_img']
+        if was_live:
+            self._stop_live_acquisition()
 
         try:
+            cam.start_video_capture()
+
             print("creating h5")
             self.h5_file = h5_io.h5_base_file(self.app, measurement=self)
             self.h5_filename = self.h5_file.filename
@@ -153,7 +225,7 @@ class ZWOCameraCaptureMeasure(Measurement):
             self.h5_m = h5_io.h5_create_measurement_group(measurement=self, h5group=self.h5_file)
 
             print("capture frame")
-            new_img = cam.camera.capture_video_frame()
+            new_img = cam.capture_video_frame()
 
             print("save jpg")
             imageio.imsave(self.h5_filename +".jpg", new_img, quality=100)
@@ -162,6 +234,16 @@ class ZWOCameraCaptureMeasure(Measurement):
             print("save h5")
             self.h5_m['img'] = new_img
 
-
         finally:
-            self.h5_file.close()
+            try:
+                self.h5_file.close()
+            except Exception:
+                pass
+            # Resume live preview if it was running, else leave the camera idle.
+            if was_live:
+                self._start_live_acquisition()
+            else:
+                try:
+                    cam.stop_video_capture()
+                except Exception:
+                    pass

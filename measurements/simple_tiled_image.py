@@ -33,6 +33,12 @@ class SimpleTiledImage(PriorStage2DScan):
 
     def pre_scan_setup(self):
         cam = self.app.hardware['zwo_camera']
+        # Pause live preview so the scan is the only camera consumer (avoids two
+        # threads pulling frames from the same video stream).
+        cap = self.app.measurements['zwo_camera_capture']
+        self._live_was_on = cap.settings['live_img']
+        if self._live_was_on:
+            cap._stop_live_acquisition()
         cam.start_video_capture()
 
         # Continuous-hold autofocus: enable the servo for the whole scan so the
@@ -44,6 +50,9 @@ class SimpleTiledImage(PriorStage2DScan):
     def post_scan_cleanup(self):
         cam = self.app.hardware['zwo_camera']
         cam.stop_video_capture()
+        cap = self.app.measurements['zwo_camera_capture']
+        if getattr(self, '_live_was_on', False):
+            cap._start_live_acquisition()
 
         pf = self._get_purefocus()
         if pf is not None:
@@ -54,7 +63,7 @@ class SimpleTiledImage(PriorStage2DScan):
         # while the stage is stationary (no motion during acquisition).
         while self.stage.is_busy_xy():
             time.sleep(0.01)
-        time.sleep(1.5)  # allow mechanical vibration to settle after motion stops
+        time.sleep(0.5)  # allow mechanical vibration to settle after motion stops
 
         # Optional per-tile focus confirmation: wait for the PF850 to report
         # in-focus (servo is already running from pre_scan_setup) before grabbing.
@@ -71,7 +80,7 @@ class SimpleTiledImage(PriorStage2DScan):
         cam = self.app.hardware['zwo_camera']
         # Discard frames exposed while the stage was moving, then grab a fresh
         # one exposed now that the stage is stationary.
-        live_img = cam.capture_video_frame()
+        live_img = cam.capture_fresh_frame()
 
         self.display_image_map[k, j, i] = live_img.sum()
 
