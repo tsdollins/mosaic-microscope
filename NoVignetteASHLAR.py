@@ -159,7 +159,7 @@ class H5GridReader(reg.Reader):
             tile = np.clip(tile, info.min, info.max)
         tile = tile.astype(dt)
 
-        return np.ascontiguousarray(tile[:, ::-1])   # horizontal flip
+        return np.ascontiguousarray(tile[::-1, ::-1])
 
 
 reader = H5GridReader(

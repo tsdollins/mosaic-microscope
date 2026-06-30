@@ -21,6 +21,14 @@ class PriorStageHW(HardwareComponent):
                           spinbox_decimals=4)
         self.settings.New("y_target", dtype=float, unit="mm",
                           spinbox_decimals=4)
+
+        self.settings.New('new_x_target', dtype=float, unit="mm",
+                          spinbox_decimals=4)      
+        self.settings.New('new_y_target', dtype=float, unit="mm",
+                          spinbox_decimals=4)
+    
+        self.settings.New('target_j', dtype=float, initial=1, ro=False, spinbox_step=1)
+        self.settings.New('target_k', dtype=float, initial=1, ro=False, spinbox_step=1)
         self.settings.New("stage_name", dtype=str, ro=True)
 
         self.add_operation("Halt XY", self.halt_xy)
@@ -93,3 +101,27 @@ class PriorStageHW(HardwareComponent):
         if self.settings["connected"]:
             self.settings.x_position.read_from_hardware()
             self.settings.y_position.read_from_hardware()
+
+    # --- Locate functions ---
+
+    def locate_xy(self):
+        self.settings['x_target'] = self.settings['new_x_target']
+        self.settings['y_target'] = self.settings['new_y_target']
+
+    def locate_tile(self):
+        m = self.app.measurements['simple_tiled_image']
+        h0 = m.settings['h0']
+        v0 = m.settings['v0']
+        Nh = m.settings['Nh']
+        Nv = m.settings['Nv']
+        dh = m.settings['dh']
+        dv = m.settings['dv']
+        j = abs(self.settings['target_j'])
+        k = abs(self.settings['target_k'])
+        if j > Nh-1 or k > Nv-1:
+            return
+        else:
+            h_j = h0 + dh*j
+            v_k = v0 + dv*k
+            self.settings['x_target'] = h_j
+            self.settings['y_target'] = v_k

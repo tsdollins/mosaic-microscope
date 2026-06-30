@@ -95,6 +95,39 @@ class PriorStageDev:
         return self._cmd("controller.serialnumber.get")
 
     # ------------------------------------------------------------------ #
+    # Nosepiece / objective turret (same controller session)              #
+    # ------------------------------------------------------------------ #
+
+    def nosepiece_fitted(self) -> bool:
+        """True if the controller has auto-detected a fitted nosepiece."""
+        return self._cmd("controller.nosepiece.fitted.get") != "0"
+
+    def get_nosepiece_name(self) -> str:
+        return self._cmd("controller.nosepiece.name.get")
+
+    def get_nosepiece_num_positions(self) -> int:
+        """Number of objective positions the nosepiece has."""
+        return int(self._cmd("controller.nosepiece.no-of-positions.get"))
+
+    def get_nosepiece_position(self) -> int:
+        """Currently selected objective position (1-based)."""
+        return int(self._cmd("controller.nosepiece.position.get"))
+
+    def goto_nosepiece_position(self, position: int, wait: bool = True):
+        """Rotate the turret to objective `position` (1-based)."""
+        self._cmd(f"controller.nosepiece.goto-position {int(position)}")
+        if wait:
+            while self.is_nosepiece_busy():
+                time.sleep(_POLL_INTERVAL)
+
+    def is_nosepiece_busy(self) -> bool:
+        return self._cmd("controller.nosepiece.busy.get") != "0"
+
+    def nosepiece_home(self):
+        """Home the nosepiece to position 1 (required for rotational turrets)."""
+        self._cmd("controller.nosepiece.home")
+
+    # ------------------------------------------------------------------ #
     # Internal helpers                                                     #
     # ------------------------------------------------------------------ #
 

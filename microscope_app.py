@@ -12,6 +12,12 @@ class MicroscopeApp(BaseMicroscopeApp):
         from ScopeFoundryHW.HW_prior_stage.prior_stage_hw import PriorStageHW
         self.add_hardware(PriorStageHW(self))
 
+        from ScopeFoundryHW.HW_prior_turret.prior_turret_hw import PriorTurretHW
+        self.add_hardware(PriorTurretHW(self))
+
+        from ScopeFoundryHW.HW_prior_purefocus.purefocus_hw import PureFocusHW
+        self.add_hardware(PureFocusHW(self))
+
         from ScopeFoundryHW.HW_zwo_camera.zwo_camera_hw import ZWOCameraHW
         self.add_hardware(ZWOCameraHW(self))
 
@@ -35,7 +41,30 @@ class MicroscopeApp(BaseMicroscopeApp):
         self.settings.New("panel_width", dtype=float, ro=False, unit="mm",
                           spinbox_decimals=4, initial=2.695)
 
+        # Auto-update the tile field-of-view (panel_width/height) whenever the
+        # objective changes or the camera ROI / pixel size changes.
+        turret = self.hardware['prior_turret']
+        camera = self.hardware['zwo_camera']
+        turret.settings.magnification.add_listener(self.update_panel_fov)
+        camera.settings.roi_width.add_listener(self.update_panel_fov)
+        camera.settings.roi_height.add_listener(self.update_panel_fov)
+        camera.settings.pixel_size_um.add_listener(self.update_panel_fov)
+        self.update_panel_fov()
+
         self.settings_load_ini('microscope_defaults.ini')
+
+    def update_panel_fov(self, *args):
+        """Set panel_width/panel_height (mm) from the current objective and the
+        camera ROI + pixel size:  FOV = ROI_px * pixel_um / magnification / 1000.
+        """
+        camera = self.hardware['zwo_camera']
+        turret = self.hardware['prior_turret']
+        mag = turret.settings['magnification']
+        if mag <= 0:
+            return  # objective magnification not configured yet
+        px_mm = camera.settings['pixel_size_um'] / 1000.0
+        self.settings['panel_width'] = camera.settings['roi_width'] * px_mm / mag
+        self.settings['panel_height'] = camera.settings['roi_height'] * px_mm / mag
 
     def _post_setup_ui_quickaccess(self):
         Q = self.add_quickbar(
@@ -83,7 +112,14 @@ class MicroscopeApp(BaseMicroscopeApp):
         Q.snap_save_pushButton.clicked.connect(camera_capture.snap_and_save)
         # zwo_iso_comboBox, zwo_exp_comboBox, zwo_color_temp_comboBox,
         # open_last_img_pushButton, show_last_img_pushButton — not yet connected
-        # z_up/down/halt, stage_locator buttons — not yet connected
+
+        # --- Z Focus (PureFocus850) ---
+        purefocus = self.hardware['prior_purefocus']
+        purefocus.settings.z_position.connect_to_widget(Q.z_pos_doubleSpinBox)
+        purefocus.settings.z_step.connect_to_widget(Q.z_step_doubleSpinBox)
+        Q.z_up_pushButton.clicked.connect(purefocus.z_up)
+        Q.z_down_pushButton.clicked.connect(purefocus.z_down)
+        Q.z_halt_pushButton.clicked.connect(purefocus.z_halt)
 
         # --- Scan Parameters ---
         scan = self.measurements['simple_tiled_image']
@@ -93,6 +129,15 @@ class MicroscopeApp(BaseMicroscopeApp):
         self.settings.panel_height.connect_to_widget(Q.panel_height_doubleSpinBox)
         self.settings.panel_width.connect_to_widget(Q.panel_width_doubleSpinBox)
         Q.calculate_pushButton.clicked.connect(self.new_bounds)
+
+        # --- Locate XY and Locate Tile ---
+        stage.settings.new_x_target.connect_to_widget(Q.target_x_locate_doubleSpinBox)
+        stage.settings.new_y_target.connect_to_widget(Q.target_y_locate_doubleSpinBox)
+        Q.locate_target_pushButton.clicked.connect(stage.locate_xy)
+
+        stage.settings.target_j.connect_to_widget(Q.target_j_doubleSpinBox)
+        stage.settings.target_k.connect_to_widget(Q.target_k_doubleSpinBox)
+        Q.locate_tile_pushButton.clicked.connect(stage.locate_tile)
 
 
     def new_bounds(self, *args):
