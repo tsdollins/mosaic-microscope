@@ -16,6 +16,7 @@ dependencies = [
     "ipython",
     "qtconsole",
     "napari>=0.7.1",
+    "ashlar>=1.20.0",
 ]
 
 [project.scripts]

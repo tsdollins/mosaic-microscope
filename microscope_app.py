@@ -31,9 +31,9 @@ class MicroscopeApp(BaseMicroscopeApp):
         self.settings.New("overlap", dtype=float, ro=False, spinbox_step=5,
                           description="Percent overlap between adjacent tiles")
         self.settings.New("panel_height", dtype=float, ro=False, unit="mm",
-                          spinbox_decimals=4, initial=2.657)
+                          spinbox_decimals=4, initial=2.695)
         self.settings.New("panel_width", dtype=float, ro=False, unit="mm",
-                          spinbox_decimals=4, initial=2.657)
+                          spinbox_decimals=4, initial=2.695)
 
         self.settings_load_ini('microscope_defaults.ini')
 
@@ -107,11 +107,14 @@ class MicroscopeApp(BaseMicroscopeApp):
         for name in ('simple_tiled_image', 'continuous_motion_image'):  # scan measurement keys
             s = self.measurements[name].settings
 
-            Nh = s.Nh.val - 1
-            Nv = s.Nv.val - 1
+            Nh = s.Nh.val
+            Nv = s.Nv.val
 
-            Lh = h + (Nh - 1) * h * (1 - overlap)
-            Lv = w + (Nv - 1) * w * (1 - overlap)
+            # Bounds are tile-CENTER positions: Nh centers span h0..h1, so the
+            # center step is Lh/(Nh-1). For a true overlap fraction the step must
+            # be tile*(1-overlap) -> Lh = (Nh-1) * tile * (1-overlap).
+            Lh = (Nh - 1) * h * (1 - overlap)
+            Lv = (Nv - 1) * w * (1 - overlap)
 
             s.h0.update_value(-Lh / 2)
             s.h1.update_value(Lh / 2)

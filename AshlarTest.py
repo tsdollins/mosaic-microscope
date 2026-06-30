@@ -1,5 +1,5 @@
 import os
-JAVA_HOME = r"C:\Users\lab\miniconda3\envs\scopefoundry313\Library\lib\jvm"
+JAVA_HOME = r"C:\Program Files\Eclipse Adoptium\jdk-21.0.2.13-hotspot"
 os.environ["JAVA_HOME"] = JAVA_HOME
 jvm_dir = os.path.join(JAVA_HOME, "bin", "server")
 os.environ["PATH"] = jvm_dir + os.pathsep + os.environ.get("PATH", "")
@@ -10,17 +10,23 @@ except (AttributeError, FileNotFoundError):
 
 import h5py
 import numpy as np
+from scipy.ndimage import rotate
 from ashlar import reg
 
-H5_PATH = r"C:\Users\lab\Documents\User_Images\Default\260622_104313_simple_tiled_image_flat.h5"
-OUT_PATH = r"C:\Users\lab\Documents\User_Images\Default\mosaic.ome.tif"
+H5_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\260626_150943_simple_tiled_image_flat.h5"
+OUT_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\mosaicC.ome.tif"
 
 # --- Known quantities ---
 OVERLAP = 0.15                 # 15% overlap between adjacent frames
-FRAME_W_MM = 3.4310            # physical width  of one frame (H axis) in mm  <-- set this
-FRAME_H_MM = 2.3031            # physical height of one frame (V axis) in mm  <-- set this
+FRAME_W_MM = 2.695            # physical width  of one frame (H axis) in mm  <-- set this
+FRAME_H_MM = 2.695            # physical height of one frame (V axis) in mm  <-- set this
 
 ALIGN_CHANNEL = 1             # which channel to align on (0=R, 1=G, 2=B); G is usually sharpest
+
+# Known camera-vs-stage rotation. ashlar has no rotation model, so we de-rotate
+# each tile in the reader before alignment. Use the angle that made features line
+# up in MosaicViewer.py (negate if alignment gets worse). 0 disables correction.
+ROTATION_CORRECTION_DEG = -1.0
 
 
 class H5GridMetadata(reg.Metadata):
@@ -107,7 +113,16 @@ class H5GridReader(reg.Reader):
         else:
             tile = self.imgs[0, r, col, :, :]
 
-        return np.ascontiguousarray(tile[:, ::-1])   # horizontal flip
+        tile = tile[::-1, ::-1]   # 180 flip (acquisition orientation)
+
+        # Incorporate the known camera-vs-stage rotation: de-rotate each tile
+        # about its center, keeping its size so the grid metadata stays valid.
+        # ashlar then only has to solve translations on corrected tiles.
+        if ROTATION_CORRECTION_DEG:
+            tile = rotate(tile, angle=ROTATION_CORRECTION_DEG, axes=(0,1), reshape=False,
+                          order=1, mode="constant", cval=0)
+
+        return np.ascontiguousarray(tile)
 
 
 reader = H5GridReader(H5_PATH, OVERLAP, FRAME_W_MM, FRAME_H_MM)
@@ -124,7 +139,7 @@ print("w overlap (px):", reader.metadata.tw - reader.metadata._step_h_px)
 
 # Align on a single channel (alignment must use one consistent channel)
 align_ch = ALIGN_CHANNEL if reader.is_rgb else 0
-aligner = reg.EdgeAligner(reader, channel=align_ch, max_shift=50, verbose=True)
+aligner = reg.EdgeAligner(reader, channel=align_ch, max_shift=100, verbose=True)
 aligner.run()
 
 # Mosaic composites ALL channels using the alignment from above
