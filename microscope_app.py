@@ -41,7 +41,30 @@ class MicroscopeApp(BaseMicroscopeApp):
         self.settings.New("panel_width", dtype=float, ro=False, unit="mm",
                           spinbox_decimals=4, initial=2.695)
 
+        # Auto-update the tile field-of-view (panel_width/height) whenever the
+        # objective changes or the camera ROI / pixel size changes.
+        turret = self.hardware['prior_turret']
+        camera = self.hardware['zwo_camera']
+        turret.settings.magnification.add_listener(self.update_panel_fov)
+        camera.settings.roi_width.add_listener(self.update_panel_fov)
+        camera.settings.roi_height.add_listener(self.update_panel_fov)
+        camera.settings.pixel_size_um.add_listener(self.update_panel_fov)
+        self.update_panel_fov()
+
         self.settings_load_ini('microscope_defaults.ini')
+
+    def update_panel_fov(self, *args):
+        """Set panel_width/panel_height (mm) from the current objective and the
+        camera ROI + pixel size:  FOV = ROI_px * pixel_um / magnification / 1000.
+        """
+        camera = self.hardware['zwo_camera']
+        turret = self.hardware['prior_turret']
+        mag = turret.settings['magnification']
+        if mag <= 0:
+            return  # objective magnification not configured yet
+        px_mm = camera.settings['pixel_size_um'] / 1000.0
+        self.settings['panel_width'] = camera.settings['roi_width'] * px_mm / mag
+        self.settings['panel_height'] = camera.settings['roi_height'] * px_mm / mag
 
     def _post_setup_ui_quickaccess(self):
         Q = self.add_quickbar(

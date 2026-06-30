@@ -14,6 +14,10 @@ class PriorTurretHW(HardwareComponent):
 
     name = "prior_turret"
 
+    # Objective magnification in each physical turret slot (1-based).
+    DEFAULT_MAGS = {1: 100.0, 2: 40.0, 3: 5.0, 4: 10.0, 5: 20.0, 6: 50.0}
+    MAX_SLOTS = 6
+
     def setup(self):
         self.settings.New("position", dtype=int, initial=1, vmin=1,
                           description="Objective turret position (1-based)")
@@ -23,7 +27,27 @@ class PriorTurretHW(HardwareComponent):
                           description="Send OBJ,n to the PureFocus850 when the "
                                       "turret position changes")
 
+        # Per-slot objective magnifications (editable; persisted via the ini).
+        for i in range(1, self.MAX_SLOTS + 1):
+            self.settings.New(f"mag_{i}", dtype=float,
+                              initial=self.DEFAULT_MAGS.get(i, 0.0),
+                              description=f"Objective magnification in turret slot {i}")
+        # Magnification of the objective currently in the light path.
+        self.settings.New("magnification", dtype=float, ro=True,
+                          description="Magnification of the current objective")
+
+        # Keep `magnification` in sync with the current slot and the slot table.
+        self.settings.position.add_listener(self._update_magnification)
+        for i in range(1, self.MAX_SLOTS + 1):
+            self.settings.get_lq(f"mag_{i}").add_listener(self._update_magnification)
+        self._update_magnification()
+
         self.add_operation("Home turret", self.home)
+
+    def _update_magnification(self):
+        pos = self.settings["position"]
+        if 1 <= pos <= self.MAX_SLOTS:
+            self.settings["magnification"] = self.settings[f"mag_{pos}"]
 
         self.update_timer = QtCore.QTimer()
         self.update_timer.timeout.connect(self._on_update_timer)

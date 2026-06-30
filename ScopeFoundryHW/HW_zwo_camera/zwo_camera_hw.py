@@ -15,7 +15,15 @@ class ZWOCameraHW(HardwareComponent):
         S.New('img_type', dtype=str, choices=self.img_types.keys())
         S.New('live_update', dtype=bool, initial=True)
         S.New('live_update_period', dtype=int, unit='ms', initial=100)
-        
+
+        # Sensor pixel pitch (auto-read from the camera on connect) and the
+        # current ROI. Used to compute the sample field-of-view per objective.
+        S.New('pixel_size_um', dtype=float, initial=3.76, ro=True, unit='um')
+        S.New('roi_width', dtype=int, initial=3584, vmin=8,
+              description='Camera ROI width in px (multiple of 8)')
+        S.New('roi_height', dtype=int, initial=3584, vmin=2,
+              description='Camera ROI height in px (multiple of 2)')
+
         # Create Logged Quantities for each supported camera control
         for c in self.possible_controls.values():
             unit = c.get('unit',None)
@@ -46,6 +54,23 @@ class ZWOCameraHW(HardwareComponent):
         # grab. The ASI SDK is not safe to call these concurrently for one camera.
         # Re-entrant because set_img_type() calls stop/start_video_capture().
         self._cam_lock = threading.RLock()
+
+        S.roi_width.add_listener(self._apply_roi)
+        S.roi_height.add_listener(self._apply_roi)
+
+    def _apply_roi(self):
+        """Apply the roi_width/roi_height settings to the camera (auto-centered).
+        Safe to call before connect (no-op) and while capturing (stops/restarts)."""
+        if not hasattr(self, 'camera'):
+            return
+        with self._cam_lock:
+            vc = self._video_capture_on
+            if vc:
+                self.stop_video_capture()
+            self.camera.set_roi(width=self.settings['roi_width'],
+                                height=self.settings['roi_height'])
+            if vc:
+                self.start_video_capture()
 
     def on_new_live_update_period(self):
         #print("asdf")
@@ -88,6 +113,9 @@ class ZWOCameraHW(HardwareComponent):
         print(self.cam_props)
         
         S['name'] = self.cam_props['Name']
+        # Auto-read the sensor pixel pitch (um) from the camera
+        if 'PixelSize' in self.cam_props:
+            S['pixel_size_um'] = float(self.cam_props['PixelSize'])
         
         
         S.img_type.connect_to_hardware(
@@ -138,9 +166,8 @@ class ZWOCameraHW(HardwareComponent):
                 lq = S.get_lq(pc['Name'])
                 print(f"Possible Control {pc['Name']} not in current camera controls")
                 lq.change_readonly(True)
-        # Fixed centered ROI to match the illuminated area (unbinned sensor px).
-        # width % 8 == 0, height % 2 == 0; start_x/start_y omitted -> auto-center.
-        self.camera.set_roi(width=3584, height=3584)
+        # Apply the configured ROI (auto-centered). width % 8 == 0, height % 2 == 0.
+        self._apply_roi()
             
     def disconnect(self):
         self.settings.disconnect_all_from_hardware()
