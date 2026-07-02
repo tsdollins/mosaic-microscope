@@ -17,9 +17,13 @@ dependencies = [
     "qtconsole",
     "napari>=0.7.1",
     "ashlar>=1.20.0",
+    "nano-crucible",
 ]
 
 [project.scripts]
 microscope-app = "microscope_app:main"
 
 [tool.uv]
+
+[tool.uv.sources]
+nano-crucible = { git = "https://github.com/MolecularFoundryCrucible/nano-crucible", branch = "dev" }
