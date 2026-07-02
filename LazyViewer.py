@@ -1,20 +1,7 @@
-import h5py
-import napari
-r"""
-H5_PATH = r"C:\Users\lab\Documents\User_Images\Default\d260610_143025_simple_tiled_image.h5"
-
-f = h5py.File(H5_PATH, "r")
-imgs = f["measurement/simple_tiled_image/live_img_map"]
-
-viewer = napari.Viewer()
-viewer.add_image(imgs, name="tiles")
-napari.run()
-"""
-
 import napari
 import tifffile
 
-OUT_PATH = r"C:\Users\lab\Documents\User_Images\Default\mosaic.ome.tif"
+OUT_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\mosaicFull.ome.tif"
 
 with tifffile.TiffFile(OUT_PATH) as tif:
     series = tif.series[0]

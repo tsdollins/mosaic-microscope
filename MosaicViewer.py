@@ -76,10 +76,12 @@ def build_mosaic(imgs, Nv, Nh, th, tw, nc, apply_rotation):
                 tile = imgs[0, r, c, :, :]
             else:
                 tile = imgs[0, r, c, :, :, :]
-            tile = tile[::-1, ::-1]
+            # Orientation flip is now baked into the saved h5 data.
             if apply_rotation and ROTATION_CORRECTION_DEG:
                 tile = rotate_tile(tile, ROTATION_CORRECTION_DEG)
-            y, x = r * step_y, c * step_x
+            # Scan rasters v0->v1 (bottom->top, +y up) but image row 0 is the
+            # top, so place rows from the bottom up.
+            y, x = (Nv - 1 - r) * step_y, c * step_x
             if feather:
                 acc[y:y+th, x:x+tw] += tile.astype(np.float32) * win_b
                 wsum[y:y+th, x:x+tw] += win

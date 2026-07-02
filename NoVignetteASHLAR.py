@@ -63,8 +63,10 @@ class H5GridMetadata(reg.Metadata):
     def tile_position(self, i):
         r = i // self.Nh
         c = i % self.Nh
-        # position is [y, x] in pixels
-        return np.array([r * self._step_v_px, c * self._step_h_px], dtype=float)
+        # position is [y, x] in pixels. Scan rasters v0->v1 (bottom->top, +y up)
+        # but image row 0 is the top, so place rows from the bottom up.
+        return np.array([(self.Nv - 1 - r) * self._step_v_px,
+                         c * self._step_h_px], dtype=float)
 
 
 class H5GridReader(reg.Reader):
@@ -159,7 +161,8 @@ class H5GridReader(reg.Reader):
             tile = np.clip(tile, info.min, info.max)
         tile = tile.astype(dt)
 
-        return np.ascontiguousarray(tile[::-1, ::-1])
+        # Orientation flip is now baked into the saved h5 data.
+        return np.ascontiguousarray(tile)
 
 
 reader = H5GridReader(

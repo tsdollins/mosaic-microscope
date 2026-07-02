@@ -13,6 +13,9 @@ class PriorStageHW(HardwareComponent):
         self.settings.New("speed_xy", dtype=float, initial=10.0, unit="mm/s",
                           vmin=0.001, vmax=100.0, spinbox_decimals=1,
                           description="Max stage speed in mm/s")
+        self.settings.New("invert_x", dtype=bool, initial=True,
+                          description="Invert stage X sign so +X moves right "
+                                      "(applies controller hostdirection after connect)")
         self.settings.New("x_position", dtype=float, ro=True, unit="mm",
                           spinbox_decimals=4)
         self.settings.New("y_position", dtype=float, ro=True, unit="mm",
@@ -33,6 +36,8 @@ class PriorStageHW(HardwareComponent):
 
         self.add_operation("Halt XY", self.halt_xy)
 
+        self.settings.invert_x.add_listener(self._on_invert_x)
+
         self.update_timer = QtCore.QTimer()
         self.update_timer.timeout.connect(self._on_update_timer)
         self.update_timer.start(200)
@@ -47,6 +52,10 @@ class PriorStageHW(HardwareComponent):
             raise
 
         self.settings["stage_name"] = self.dev.get_stage_name()
+
+        # connect() reset hostdirection to default (1 1); apply invert_x now, so
+        # the position reads below already carry the intended X sign.
+        self._apply_host_direction()
 
         self.settings.x_position.connect_to_hardware(
             read_func=lambda: self.dev.get_position()[0] / 1000.0)
@@ -83,6 +92,23 @@ class PriorStageHW(HardwareComponent):
 
     def _move_y_target(self, y_mm):
         self.dev.goto_position(self.settings["x_target"] * 1000, y_mm * 1000, wait=False)
+
+    def _apply_host_direction(self):
+        """Push the invert_x setting to the controller (Y left unchanged).
+        Must run after connect / stage.ss.set, which reset it to default."""
+        x_dir = -1 if self.settings["invert_x"] else 1
+        self.dev.set_host_direction(x_dir, 1)
+
+    def _on_invert_x(self):
+        """Re-apply direction live. Flipping X changes the sign of reported
+        positions, so refresh readings and re-seat targets (no physical move)."""
+        if not self.settings["connected"]:
+            return
+        self._apply_host_direction()
+        self.settings.x_position.read_from_hardware()
+        self.settings.y_position.read_from_hardware()
+        self.settings["x_target"] = self.settings["x_position"]
+        self.settings["y_target"] = self.settings["y_position"]
 
     def halt_xy(self):
         self.dev.stop()

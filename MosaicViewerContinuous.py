@@ -23,7 +23,8 @@ xs = coords[:, 0]
 ys = coords[:, 1]
 
 px = ((xs - xs.min()) * PX_PER_MM_X).round().astype(int)
-py = ((ys - ys.min()) * PX_PER_MM_Y).round().astype(int)
+# +y is up, but image row 0 is the top, so map max-y to the top (py=0).
+py = ((ys.max() - ys) * PX_PER_MM_Y).round().astype(int)
 
 H = py.max() + th
 W = px.max() + tw
@@ -38,10 +39,11 @@ print(f"Mosaic will be {H} x {W}"
       f" = {H*W/1e9:.4f} gigapixels")
 
 for i in range(N):
+    # Orientation flip is now baked into the saved h5 data.
     if nc is None:
-        tile = stack[i][::-1, ::-1]
+        tile = stack[i]
     else:
-        tile = stack[i][::-1, ::-1, :]
+        tile = stack[i]
     y = py[i]
     x = px[i]
     mosaic[y:y+th, x:x+tw] = tile

@@ -128,6 +128,24 @@ class PriorStageDev:
         self._cmd("controller.nosepiece.home")
 
     # ------------------------------------------------------------------ #
+    # Axis direction                                                      #
+    # ------------------------------------------------------------------ #
+
+    def set_host_direction(self, x_dir: int, y_dir: int):
+        """Set the physical +ve direction sign for each axis (each +1 or -1).
+
+        NOTE: the controller resets this to the default (1 1) on
+        `controller.connect` and on `controller.stage.ss.set`, so it must be
+        (re)applied after those.
+        """
+        self._cmd(f"controller.stage.hostdirection.set {int(x_dir)} {int(y_dir)}")
+
+    def get_host_direction(self) -> tuple[int, int]:
+        """Return the current (x, y) host direction signs, e.g. (1, 1) or (-1, 1)."""
+        x, y = self._cmd("controller.stage.hostdirection.get").split()
+        return int(x), int(y)
+
+    # ------------------------------------------------------------------ #
     # Internal helpers                                                     #
     # ------------------------------------------------------------------ #
 

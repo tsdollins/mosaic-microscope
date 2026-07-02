@@ -62,8 +62,10 @@ class H5GridMetadata(reg.Metadata):
     def tile_position(self, i):
         r = i // self.Nh
         c = i % self.Nh
-        # position is [y, x] in pixels
-        return np.array([r * self._step_v_px, c * self._step_h_px], dtype=float)
+        # position is [y, x] in pixels. Scan rasters v0->v1 (bottom->top, +y up)
+        # but image row 0 is the top, so place rows from the bottom up.
+        return np.array([(self.Nv - 1 - r) * self._step_v_px,
+                         c * self._step_h_px], dtype=float)
 
 
 class H5GridReader(reg.Reader):
@@ -113,7 +115,7 @@ class H5GridReader(reg.Reader):
         else:
             tile = self.imgs[0, r, col, :, :]
 
-        tile = tile[::-1, ::-1]   # 180 flip (acquisition orientation)
+        # 180 flip (acquisition orientation) is now baked into the saved h5 data.
 
         # Incorporate the known camera-vs-stage rotation: de-rotate each tile
         # about its center, keeping its size so the grid metadata stays valid.
@@ -141,6 +143,28 @@ print("w overlap (px):", reader.metadata.tw - reader.metadata._step_h_px)
 align_ch = ALIGN_CHANNEL if reader.is_rgb else 0
 aligner = reg.EdgeAligner(reader, channel=align_ch, max_shift=100, verbose=True)
 aligner.run()
+
+
+# Nominal positions from your metadata (what you fed in)
+nominal = np.array([reader.metadata.tile_position(i)
+                    for i in range(reader.metadata._num_images)])
+
+# Final solved positions
+final = aligner.positions
+
+# Per-tile correction magnitude
+corrections = np.linalg.norm(final - nominal, axis=1)
+
+print("\n--- Position corrections (px) ---")
+for i, d in enumerate(corrections):
+    r, c = i // reader.Nh, i % reader.Nh
+    print(f"tile {i:3d} (r{r},c{c}): correction = {d:7.2f} px")
+
+print(f"\nmedian correction: {np.median(corrections):.2f} px")
+print(f"max correction:    {np.max(corrections):.2f} px")
+print(f"tiles with ~0 correction (<1px): "
+      f"{np.sum(corrections < 1.0)} / {len(corrections)}")
+
 
 # Mosaic composites ALL channels using the alignment from above
 mosaic_channels = range(reader.metadata.num_channels)
