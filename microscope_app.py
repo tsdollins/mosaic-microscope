@@ -33,6 +33,8 @@ class MicroscopeApp(BaseMicroscopeApp):
         from measurements.continuous_motion_image import ContinuousMotionImage
         self.add_measurement(ContinuousMotionImage(self))
 
+        from measurements.timelapse import Timelapse
+        self.add_measurement(Timelapse(self))
         # Scan-planning parameters: tile field-of-view + overlap -> scan bounds
         self.settings.New("overlap", dtype=float, ro=False, spinbox_step=5,
                           description="Percent overlap between adjacent tiles")
