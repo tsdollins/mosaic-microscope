@@ -2,6 +2,7 @@ from ScopeFoundry import HardwareComponent
 from qtpy import QtCore
 import os
 import threading
+import numpy as np
 
 class ZWOCameraHW(HardwareComponent):
     
@@ -23,6 +24,17 @@ class ZWOCameraHW(HardwareComponent):
               description='Camera ROI width in px (multiple of 8)')
         S.New('roi_height', dtype=int, initial=3584, vmin=2,
               description='Camera ROI height in px (multiple of 2)')
+
+        # Orientation correction baked into every delivered frame (see
+        # orient_frame). Applied identically by the live preview, snap, and the
+        # scan data-writers so live view, saved data, and stitching all agree.
+        # Default is no flip: raw frames are already in the correct orientation
+        # (the live view's vertical display is handled by the plot's invertY,
+        # not here). Toggle these only if the physical camera mounting changes.
+        S.New('flip_h', dtype=bool, initial=False,
+              description='Flip frames horizontally (left-right)')
+        S.New('flip_v', dtype=bool, initial=False,
+              description='Flip frames vertically (up-down)')
 
         # Create Logged Quantities for each supported camera control
         for c in self.possible_controls.values():
@@ -80,7 +92,16 @@ class ZWOCameraHW(HardwareComponent):
     def on_live_update_timer(self):
         S = self.settings
         if S['connected'] and S['live_update']:
-            self.read_from_hardware()
+            # This runs on the GUI thread. Only poll control values if the camera
+            # SDK is free right now -- if a scan / acquisition thread is mid-grab
+            # (holding _cam_lock), skip this tick instead of blocking the GUI for
+            # the duration of the grab. The re-entrant lock is released again
+            # immediately; the individual control read_funcs re-acquire it.
+            if self._cam_lock.acquire(blocking=False):
+                try:
+                    self.read_from_hardware()
+                finally:
+                    self._cam_lock.release()
     
     def connect(self):
         import zwoasi
@@ -137,13 +158,21 @@ class ZWOCameraHW(HardwareComponent):
                     vmin = c['MinValue'],
                     vmax = c['MaxValue'])
                 
+            # All control get/set go through the SAME _cam_lock as frame capture.
+            # These read_funcs are driven by a GUI-thread QTimer (live_update_timer)
+            # while the acquisition/measurement thread grabs frames; the ASI SDK is
+            # not thread-safe per camera, so unlocked control access here races the
+            # frame grabs and can wedge the camera handle (breaking live preview
+            # until reconnect -- notably right after a scan finishes).
             def read_func(c=c):
-                value,auto = self.camera.get_control_value(c['ControlType'])
+                with self._cam_lock:
+                    value,auto = self.camera.get_control_value(c['ControlType'])
                 #print("read", c['Name'], value,auto)
                 return value
             def write_func(x, c=c):
                 #print("write", c['Name'], x)
-                self.camera.set_control_value(c['ControlType'], x)
+                with self._cam_lock:
+                    self.camera.set_control_value(c['ControlType'], x)
             lq.connect_to_hardware(
                 read_func = read_func,
                 write_func = write_func
@@ -152,10 +181,12 @@ class ZWOCameraHW(HardwareComponent):
                 #print(c['Name'], "auto supported")
                 lq_auto = S.get_lq(c['Name']+"_auto")
                 def read_func(c=c):
-                    value,auto = self.camera.get_control_value(c['ControlType'])
+                    with self._cam_lock:
+                        value,auto = self.camera.get_control_value(c['ControlType'])
                     return auto
                 def write_func(auto,c=c):
-                    self.camera.set_control_value(c['ControlType'], self.settings[c['Name']], auto)
+                    with self._cam_lock:
+                        self.camera.set_control_value(c['ControlType'], self.settings[c['Name']], auto)
                 lq_auto.connect_to_hardware(
                     read_func = read_func,
                     write_func = write_func
@@ -247,6 +278,21 @@ class ZWOCameraHW(HardwareComponent):
 
             # The next delivered frame is exposed after the drain -> stage stationary.
             return self.camera.capture_video_frame()
+
+    def orient_frame(self, frame):
+        """Apply the configured orientation correction to a raw camera frame.
+
+        Used by BOTH the live preview and the scan data-writers so what you see
+        live matches what is saved and later stitched. Flips the first two
+        (spatial) axes; any trailing color axis is preserved. Because this is
+        baked into the saved data, downstream scripts no longer flip tiles.
+        """
+        S = self.settings
+        if S['flip_v']:
+            frame = frame[::-1]
+        if S['flip_h']:
+            frame = frame[:, ::-1]
+        return np.ascontiguousarray(frame)
 
     img_types = {
         'RAW8' : 0,

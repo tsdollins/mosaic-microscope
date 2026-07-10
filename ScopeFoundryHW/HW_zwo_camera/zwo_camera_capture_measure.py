@@ -64,7 +64,6 @@ class ZWOCameraCaptureMeasure(Measurement):
         self.settings.New('live_update_period', dtype=int, initial=500, unit='ms',
                           vmin=100, vmax=10000,
                           description='Interval between live preview frame captures')
-        self.settings.New('rotate', dtype=bool)
         self.settings.New('px_bin', dtype=int, initial=1, choices=(1,2,4,8,16,32),
                           description='Software display downsample (does not reduce USB transfer)')
 
@@ -166,8 +165,9 @@ class ZWOCameraCaptureMeasure(Measurement):
         if im is None:
             return
 
-        if self.settings['rotate']:
-            im = im.swapaxes(0, 1)
+        # Same orientation correction that is baked into the saved data, so the
+        # live view matches what gets stored/stitched.
+        im = self.app.hardware['zwo_camera'].orient_frame(im)
 
         stride = self.settings['px_bin']
         if stride > 1:
@@ -196,8 +196,16 @@ class ZWOCameraCaptureMeasure(Measurement):
 
         self.xy_plot = self.graph_layout.addPlot(0,0)
         self.xy_plot.setAspectLocked(lock=True, ratio=1)
+        # invertY so row 0 is drawn at the TOP like a normal image viewer.
+        # Without this, pyqtgraph draws with the y-axis pointing up (row 0 at
+        # the bottom), i.e. a vertical flip vs saved files -- which is why a
+        # flip_v that looked right live came out doubly-flipped in saved scans.
+        self.xy_plot.invertY(True)
         #self.xy_plot.setLabels(left=('mcl y', 'm'), bottom=('mcl x', 'm'))
-        self.live_img_item = pg.ImageItem()
+        # row-major so a numpy [row, col] frame is displayed faithfully (default
+        # col-major transposes it, which made stage +x appear to move the view
+        # up -- a 90 deg mismatch with stage motion).
+        self.live_img_item = pg.ImageItem(axisOrder='row-major')
         self.xy_plot.addItem(self.live_img_item)
 
         self.xy_plot.addItem(pg.InfiniteLine(angle=0))
@@ -225,7 +233,7 @@ class ZWOCameraCaptureMeasure(Measurement):
             self.h5_m = h5_io.h5_create_measurement_group(measurement=self, h5group=self.h5_file)
 
             print("capture frame")
-            new_img = cam.capture_video_frame()
+            new_img = cam.orient_frame(cam.capture_video_frame())
 
             print("save jpg")
             imageio.imsave(self.h5_filename +".jpg", new_img, quality=100)

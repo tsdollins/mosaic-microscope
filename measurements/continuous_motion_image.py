@@ -32,7 +32,8 @@ class ContinuousMotionImage(PriorStage2DScan):
         x = self.stage.settings.x_position.read_from_hardware()
         y = self.stage.settings.y_position.read_from_hardware()
 
-        live_img = cam.capture_video_frame()
+        # Orientation corrected here so downstream scripts don't flip tiles.
+        live_img = cam.orient_frame(cam.capture_video_frame())
 
         latency = -0.25   # seconds — measure yours precisely from the two-speed data
         speed = self.stage.settings['speed_xy']

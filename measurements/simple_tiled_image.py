@@ -79,8 +79,9 @@ class SimpleTiledImage(PriorStage2DScan):
 
         cam = self.app.hardware['zwo_camera']
         # Discard frames exposed while the stage was moving, then grab a fresh
-        # one exposed now that the stage is stationary.
-        live_img = cam.capture_fresh_frame()
+        # one exposed now that the stage is stationary. Orientation is corrected
+        # here so downstream scripts don't need to flip tiles.
+        live_img = cam.orient_frame(cam.capture_fresh_frame())
 
         self.display_image_map[k, j, i] = live_img.sum()
 
