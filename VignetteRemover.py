@@ -2,10 +2,12 @@ import shutil
 import numpy as np
 import h5py
 from basicpy import BaSiC
+import tifffile
+import matplotlib.pyplot as plt
 
 # --- Paths ---
-IN_PATH  = r"C:\Users\lab\Documents\User_Images\Default\260622_104313_simple_tiled_image.h5"
-OUT_PATH = r"C:\Users\lab\Documents\User_Images\Default\260622_104313_simple_tiled_image_flat.h5"
+IN_PATH  = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\260709_161955_simple_tiled_image.h5"
+OUT_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\260709_161955_simple_tiled_image_flat.h5"
 
 # Dataset path inside the HDF5 file
 DSET = "measurement/simple_tiled_image/live_img_map"
@@ -97,6 +99,26 @@ def main():
                 write_corrected(series, c, corr.astype(dtype))
             if (series + 1) % 10 == 0 or series == n_tiles - 1:
                 print(f"  corrected tile {series + 1}/{n_tiles}")
+    
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    im0 = axes[0].imshow(b.flatfield, cmap='gray')
+    axes[0].set_title('Flatfield')
+    fig.colorbar(im0, ax=axes[0])
+
+    im1 = axes[1].imshow(b.darkfield, cmap='gray')
+    axes[1].set_title('Darkfield')
+    fig.colorbar(im1, ax=axes[1])
+    for ax in axes.flat:
+        # Pass an empty list to clear the numerical text labels
+        ax.set_xticks([])
+        ax.set_yticks([])
+    plt.tight_layout()
+    plt.show()
+    fig.savefig(r'C:\Users\Lab\Documents\NewMicroscopeApp\data\flatdarkfield_figure.png', dpi=600, bbox_inches='tight')
+
+    tifffile.imwrite(r'C:\Users\Lab\Documents\NewMicroscopeApp\data\flatfield.tif', b.flatfield.astype(np.float32))
+    tifffile.imwrite(r'C:\Users\Lab\Documents\NewMicroscopeApp\data\darkfield.tif', b.darkfield.astype(np.float32))
 
     print("Done. Corrected file written to:")
     print(f"  {OUT_PATH}")

@@ -23,8 +23,8 @@ from ashlar import reg
 
 
 # --- Paths ---
-IN_PATH  = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\260702_114513_simple_tiled_image.h5"
-OUT_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\mosaicFull.ome.tif"
+IN_PATH  = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\260709_161955_simple_tiled_image.h5"
+OUT_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\mosaicFull2.ome.tif"
 
 # Dataset path inside the HDF5 file
 DSET = "measurement/simple_tiled_image/live_img_map"
@@ -33,17 +33,17 @@ DSET = "measurement/simple_tiled_image/live_img_map"
 BASIC_DARKFIELD = True         # also estimate additive dark offset
 FIT_MAX_TILES   = 50           # subsample this many tiles for the BaSiC fit (RAM control)
 
-# --- Known quantities (stitching geometry) ---
-OVERLAP = 0.20                 # overlap fraction between adjacent frames
-FRAME_W_MM = 2.695            # physical width  of one frame (H axis) in mm  <-- set this
-FRAME_H_MM = 2.695            # physical height of one frame (V axis) in mm  <-- set this
+# --- Stitching geometry ---
+# Overlap fraction and physical frame size are NOT hardcoded: they are read from
+# the scan H5 by read_scan_geometry() (written there by simple_tiled_image, with
+# a fallback to the app-level settings ScopeFoundry always stores).
 
 ALIGN_CHANNEL = 1              # which channel to align on (0=R, 1=G, 2=B); G is usually sharpest
 
 # Known camera-vs-stage rotation. ashlar has no rotation model, so we de-rotate
 # each tile in the reader before alignment. Use the angle that made features line
 # up in MosaicViewer.py (negate if alignment gets worse). 0 disables correction.
-ROTATION_CORRECTION_DEG = -1.75
+ROTATION_CORRECTION_DEG = 0
 
 
 class H5GridMetadata(reg.Metadata):
@@ -85,11 +85,51 @@ class H5GridMetadata(reg.Metadata):
                          c * self._step_h_px], dtype=float)
 
 
+def read_scan_geometry(f):
+    """Return (overlap_frac, frame_w_mm, frame_h_mm) from an open scan H5.
+
+    Prefers the explicit attrs written on the measurement group by
+    simple_tiled_image; falls back to the app-level settings ScopeFoundry always
+    stores (so older files still work). Raises if neither is present -- there is
+    no hardcoded default.
+    """
+    meas = f.get("measurement/simple_tiled_image")
+    if meas is not None:
+        a = meas.attrs
+        if all(k in a for k in ("overlap_frac", "panel_width_mm", "panel_height_mm")):
+            return (float(a["overlap_frac"]),
+                    float(a["panel_width_mm"]),
+                    float(a["panel_height_mm"]))
+
+    app = f.get("app/settings")
+    if app is not None:
+        a = app.attrs
+        if all(k in a for k in ("overlap", "panel_width", "panel_height")):
+            # app-level 'overlap' is stored as a percent.
+            return (float(a["overlap"]) / 100.0,
+                    float(a["panel_width"]),
+                    float(a["panel_height"]))
+
+    raise ValueError(
+        "Scan geometry (overlap / panel size) not found in H5. Expected attrs "
+        "on 'measurement/simple_tiled_image' or 'overlap'/'panel_width'/"
+        "'panel_height' under 'app/settings'.")
+
+
 class H5GridReader(reg.Reader):
-    def __init__(self, path, overlap, frame_w_mm, frame_h_mm):
+    def __init__(self, path, overlap=None, frame_w_mm=None, frame_h_mm=None):
         self.path = path
         self.f = h5py.File(path, "r")
         self.imgs = self.f[DSET]
+
+        # Scan geometry: read from the H5 unless explicitly overridden.
+        geo_overlap, geo_w, geo_h = read_scan_geometry(self.f)
+        if overlap is None:
+            overlap = geo_overlap
+        if frame_w_mm is None:
+            frame_w_mm = geo_w
+        if frame_h_mm is None:
+            frame_h_mm = geo_h
 
         shape = self.imgs.shape
         # Detect layout:
@@ -181,7 +221,7 @@ class H5GridReader(reg.Reader):
 
 
 def main():
-    reader = H5GridReader(IN_PATH, OVERLAP, FRAME_W_MM, FRAME_H_MM)
+    reader = H5GridReader(IN_PATH)
 
     # geometry sanity check
     print("layout:", "RGB" if reader.is_rgb else "grayscale")
