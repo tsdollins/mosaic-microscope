@@ -33,8 +33,8 @@ class UserLoginMFCrucible(Measurement):
 
     def setup(self):
         S = self.settings
-        S.New("h5_file", dtype=str, initial="",
-              description="Path to the scan .h5 to upload")
+        S.New("h5_file", dtype="file", file_filters=["HDF5 files (*.h5)"],
+              description="Scan .h5 to upload (use the '...' button to browse)")
         S.New("project_id", dtype=str, initial="",
               description="Target Crucible project id (defaults to mf-crucible proposal)")
         S.New("dataset_name", dtype=str, initial="",
@@ -72,17 +72,13 @@ class UserLoginMFCrucible(Measurement):
         self.login_button.clicked.connect(self.log_in)
         layout.addWidget(self.login_button, 1, 0)
 
-        self.browse_button = QtWidgets.QPushButton("Browse for .h5 ...")
-        self.browse_button.clicked.connect(self.browse_h5)
-        layout.addWidget(self.browse_button, 2, 0)
-
         self.upload_button = QtWidgets.QPushButton("Upload to Crucible")
         self.upload_button.clicked.connect(self.start)
-        layout.addWidget(self.upload_button, 3, 0)
+        layout.addWidget(self.upload_button, 2, 0)
 
         self.stop_button = QtWidgets.QPushButton("Cancel")
         self.stop_button.clicked.connect(self.interrupt)
-        layout.addWidget(self.stop_button, 4, 0)
+        layout.addWidget(self.stop_button, 3, 0)
 
     # --- interactive helpers (run on the GUI thread) ------------------- #
 
@@ -95,14 +91,6 @@ class UserLoginMFCrucible(Measurement):
         except Exception as err:
             self.settings["status"] = f"login failed: {err}"
             self.log.error(traceback.format_exc())
-
-    def browse_h5(self):
-        start_dir = os.path.dirname(self.settings["h5_file"]) or os.getcwd()
-        fname, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self.ui, "Select scan HDF5", start_dir,
-            "HDF5 files (*.h5);;All files (*)")
-        if fname:
-            self.settings["h5_file"] = fname
 
     # ------------------------------------------------------------------ #
     # Upload (background thread)                                           #
@@ -223,9 +211,13 @@ class UserLoginMFCrucible(Measurement):
                         tmax = float(tile.max()) or 1.0
                         tile = (tile.astype(np.float32) / tmax * 255).astype(np.uint8)
 
+                    # Scan rasters v0->v1 (bottom->top, +y up) but image row 0 is
+                    # the top, so place rows from the bottom up -- matches
+                    # MosaicViewer.build_mosaic / full_stitch_process.
+                    mr = Nv - 1 - r
                     h = min(cell_h, tile.shape[0])
                     w = min(cell_w, tile.shape[1])
-                    montage[r * cell_h:r * cell_h + h,
+                    montage[mr * cell_h:mr * cell_h + h,
                             c * cell_w:c * cell_w + w] = tile[:h, :w]
 
         return montage

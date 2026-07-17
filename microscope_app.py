@@ -27,6 +27,12 @@ class MicroscopeApp(BaseMicroscopeApp):
         from ScopeFoundryHW.HW_zwo_camera.zwo_camera_capture_measure import ZWOCameraCaptureMeasure
         self.add_measurement(ZWOCameraCaptureMeasure(self))
 
+        from ScopeFoundryHW.HW_mf_crucible.mf_crucible_hw import MFCrucibleHW
+        self.add_hardware(MFCrucibleHW(self))
+
+        from measurements.user_login_mf_crucible import UserLoginMFCrucible
+        self.add_measurement(UserLoginMFCrucible(self))
+
         from measurements.simple_tiled_image import SimpleTiledImage
         self.add_measurement(SimpleTiledImage(self))
 
@@ -35,6 +41,9 @@ class MicroscopeApp(BaseMicroscopeApp):
 
         from measurements.timelapse import Timelapse
         self.add_measurement(Timelapse(self))
+
+        
+
         # Scan-planning parameters: tile field-of-view + overlap -> scan bounds
         self.settings.New("overlap", dtype=float, ro=False, spinbox_step=5,
                           description="Percent overlap between adjacent tiles")
