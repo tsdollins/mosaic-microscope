@@ -1,0 +1,53 @@
+substitutions:
+  _IMAGE_PATH: "us-central1-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${BRANCH_NAME}"
+
+steps:
+  # Pull latest for caching
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args: [-c, 'docker pull ${_IMAGE_PATH}:latest || exit 0']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - -c
+      - >
+        docker build
+        --build-arg githash=$(git rev-parse HEAD)
+        --build-arg repo=${REPO_NAME}
+        --build-arg devenv=${BRANCH_NAME}
+        -t ${_IMAGE_PATH}:${SHORT_SHA}
+        -t ${_IMAGE_PATH}:latest
+        --cache-from ${_IMAGE_PATH}:latest
+        .
+
+  # Push SHA-tagged image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_IMAGE_PATH}:${SHORT_SHA}']
+
+  # Push latest tag
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_IMAGE_PATH}:latest']
+
+  # Apply the deployment
+  - name: 'gcr.io/cloud-builders/kubectl'
+    args:
+    - apply
+    - -f
+    - ./k8s-conf-${BRANCH_NAME}.yaml
+    env:
+    - CLOUDSDK_COMPUTE_REGION=us-central1
+    - CLOUDSDK_CONTAINER_CLUSTER=crucible-cluster
+
+  # Roll out the new image
+  - name: 'gcr.io/cloud-builders/kubectl'
+    args:
+    - set
+    - image
+    - deployment/mosaic-stitch-consumer
+    - mosaic-stitch-consumer=${_IMAGE_PATH}:${SHORT_SHA}
+    env:
+    - CLOUDSDK_COMPUTE_REGION=us-central1
+    - CLOUDSDK_CONTAINER_CLUSTER=crucible-cluster
+
+timeout: 600s

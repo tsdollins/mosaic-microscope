@@ -19,8 +19,8 @@ the reference for porting measurements/UI.
 - No test suite. Verify edits with `uv.exe run python -m py_compile <files>` and module import.
   Full runtime needs real hardware (stage on serial COM port, camera on USB3).
 - pyproject deps: scopefoundry>=1.3.0, numpy, pyqt6, pyqtgraph, h5py, zwoasi, pyserial, imageio,
-  ipython, qtconsole, napari. Stitching/viewer scripts also need (NOT installed):
-  `ashlar`, `basicpy`, `m2stitch`.
+  ipython, qtconsole, napari, `ashlar>=1.20.0`, `nano-crucible` (git **dev** branch).
+  `basicpy`/`m2stitch` + a numpy<2 ashlar stack live in the separate **`.venv-basicpy`** env.
 
 ## LAYOUT
 - `microscope_app.py` — entry. `MicroscopeApp(BaseMicroscopeApp)`, name "MosaicMicroscope".
@@ -34,7 +34,15 @@ the reference for porting measurements/UI.
   `prior_stage_control.ui`, `prior_stage_raster.py` (`PriorStage2DScan(BaseRaster2DSlowScan)`).
 - `ScopeFoundryHW/HW_zwo_camera/` — `zwo_camera_hw.py`, `zwo_camera_capture_measure.py`,
   vendor SDK dirs `ASI_*` (gitignored).
-- `measurements/` — `simple_tiled_image.py`, `continuous_motion_image.py`, others.
+- `ScopeFoundryHW/HW_mf_crucible/` — `mf_crucible_hw.py` (`MFCrucibleHW`, name `mf-crucible`):
+  Crucible auth + metadata baked into scan H5s. See `docs/CRUCIBLE_INTEGRATION.md`.
+- `measurements/` — `simple_tiled_image.py` (now also writes co-located geometry attrs onto
+  `measurement/simple_tiled_image`: `overlap_frac`, `panel_width_mm`, `panel_height_mm`,
+  `pixel_size_um`, `magnification`, `pixel_size_um_effective`, via `_save_scan_metadata()` in
+  `pre_scan_setup`), `continuous_motion_image.py`, `user_login_mf_crucible.py` (Crucible upload), others.
+- `crucible/` — cloud stitch consumer (`crucible_stitch_process.py`, `consumer-mosaic-stitcher.py`,
+  Dockerfile, cloudbuild.yaml, k8s, pyproject/uv.lock); developed here but **deploys from the separate
+  repo `mosaic-stitch-consumer`**. See `docs/CRUCIBLE_INTEGRATION.md`.
 - Root standalone scripts imported as-is from SurveyScope: `MosaicViewer.py`,
   `MosaicViewerContinuous.py`, `LazyViewer.py`, `AshlarTest.py`, `ASHLARContinuous`,
   `NoVignetteASHLAR.py`, `VignetteRemover.py`, `M2StitchTest.py`.
@@ -75,6 +83,17 @@ the reference for porting measurements/UI.
   sequential**: move → collect → next move (so collect_pixel blocks the next move).
 - Concurrency reality: GUI-thread QTimers (live preview, HW control reads) vs the
   measurement-thread scan both touch the camera → needs a lock (known issue; see threading notes).
+
+## CRUCIBLE (data-platform integration)
+Full detail: **`docs/CRUCIBLE_INTEGRATION.md`**. Summary: `nano-crucible` client (import `crucible`,
+git dev branch; update with `uv.exe sync --upgrade-package nano-crucible`). App-side: `mf-crucible`
+HardwareComponent (metadata → every scan H5 under `hardware/mf-crucible/settings`) + the
+`user_login_mf_crucible` measurement (background upload). Server ingestor
+`SimpleTiledImageScopeFoundryH5Ingestor` already supports our scans — set `owner_orcid`/`project_id`
+at create-time (server hyphen/underscore parser bug). Cloud stitching in `crucible/` (→ separate
+repo). Trigger: `client.datasets.request_mosaic_stitch(dsid)` → `mosaic-stitch` RMQ queue. Deep-zoom
+viewer lives in the separate `crucible_graph_explorer` repo (Method A: client-side geotiff.js +
+OpenSeadragon over HTTP Range).
 
 ## GIT
 - `master` = working baseline (Prior stage + camera, no hardware binning).
