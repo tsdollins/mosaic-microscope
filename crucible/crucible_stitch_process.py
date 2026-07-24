@@ -271,8 +271,74 @@ def _write_thumbnail(ome_tif_path, out_png_path, max_px=THUMBNAIL_MAX_PX):
     return out_png_path
 
 
+def _repackage_as_ifd_pyramid(src_path, dst_path, pixel_size_um=None):
+    """Rewrite ashlar's SubIFD-pyramid OME-TIFF as a plain tiled pyramidal TIFF
+    whose overviews are reduced-resolution TOP-LEVEL pages.
+
+    Why: the deep-zoom mosaic viewer uses browser geotiff.js, which reads
+    pyramids stored as top-level IFDs but CANNOT traverse the SubIFD pyramid that
+    ashlar's PyramidWriter emits. This relocates each level from the SubIFD chain
+    to a top-level page (overviews flagged NewSubfileType=REDUCEDIMAGE).
+
+    Two transforms, both driven by ashlar's own output:
+      1. SubIFD levels -> top-level IFD pages.
+      2. ashlar stores every channel as a separate "minisblack" plane (see the
+         FIXME in reg.PyramidWriter.run); when there are exactly 3 channels we
+         interleave them to RGB so the browser renders true color.
+
+    Lossless: reuses ashlar's stored levels and re-encodes with the same codec
+    (adobe_deflate + horizontal predictor). Processes one level at a time to
+    bound peak memory (~one full level; the RGB moveaxis briefly doubles it).
+    """
+    import tifffile
+
+    with tifffile.TiffFile(src_path) as tif:
+        series = tif.series[0]
+        levels = series.levels
+        p0 = levels[0].pages[0]
+        tile = (p0.tilelength, p0.tilewidth)
+
+        # Channel layout from the series shape (tifffile squeezes a singleton
+        # channel axis, so grayscale is (H,W) and 3-channel is (C,H,W)).
+        sshape = series.shape
+        if len(sshape) == 2:
+            photometric, is_rgb = "minisblack", False
+        elif len(sshape) == 3 and sshape[0] == 3:
+            photometric, is_rgb = "rgb", True
+        else:
+            raise ValueError(
+                f"Unsupported channel layout {sshape}; expected grayscale (H,W) "
+                f"or 3-channel (3,H,W). Extend _repackage_as_ifd_pyramid for this "
+                f"case.")
+
+        res_kwargs = {}
+        if pixel_size_um:
+            res_cm = 10000.0 / float(pixel_size_um)   # px per cm
+            res_kwargs = dict(resolution=(res_cm, res_cm),
+                              resolutionunit="CENTIMETER")
+
+        with tifffile.TiffWriter(dst_path, bigtiff=True) as out:
+            for i, level in enumerate(levels):
+                arr = level.asarray()
+                if is_rgb:                                  # (C,H,W) -> (H,W,C)
+                    arr = np.ascontiguousarray(np.moveaxis(arr, 0, -1))
+                kwargs = dict(
+                    tile=tile,
+                    photometric=photometric,
+                    compression="adobe_deflate",
+                    predictor=True,
+                    subfiletype=0 if i == 0 else 1,        # 1 = REDUCEDIMAGE
+                )
+                if i == 0:
+                    kwargs.update(res_kwargs)              # calibration on base
+                out.write(arr, **kwargs)
+                del arr
+    return dst_path
+
+
 def main(directory="./"):
-    """Stitch the tiled scan found in ``directory`` into a pyramidal OME-TIFF.
+    """Stitch the tiled scan found in ``directory`` into a browser-readable,
+    pyramidal (IFD-overview) tiled TIFF.
 
     Mirrors the RGA analysis-script contract: Crucible-agnostic, takes a local
     directory, writes outputs into a subfolder, and returns a results dict for the
@@ -284,7 +350,11 @@ def main(directory="./"):
 
     out_dir = os.path.join(directory, RESULTS_SUBDIR)
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"{stem}_mosaic.ome.tif")
+    # ashlar emits a SubIFD pyramid (intermediate); we repackage it into a
+    # browser-readable IFD pyramid as the final deliverable (see
+    # _repackage_as_ifd_pyramid for why the browser can't read SubIFDs).
+    subifd_path = os.path.join(out_dir, f"{stem}_mosaic_subifd.ome.tif")
+    out_path = os.path.join(out_dir, f"{stem}_mosaic.tif")
 
     reader = H5GridReader(h5_path)
 
@@ -332,20 +402,33 @@ def main(directory="./"):
         aligner, aligner.mosaic_shape,
         channels=mosaic_channels, verbose=True,
     )
-    writer = reg.PyramidWriter([mosaic], out_path, tile_size=1024, verbose=True)
+    writer = reg.PyramidWriter([mosaic], subifd_path, tile_size=1024, verbose=True)
     writer.run()
+    print("ashlar SubIFD mosaic written; repackaging as IFD pyramid...")
 
-    print("Done. Stitched mosaic written to:")
-    print(f"  {out_path}")
-
+    # Thumbnail from the intermediate: its series.levels[-1] is the smallest
+    # pyramid level and _write_thumbnail already handles ashlar's channel order.
     thumbnail_path = None
     if SAVE_THUMBNAIL:
         thumb_png = os.path.join(out_dir, f"{stem}_mosaic_thumbnail.png")
         try:
-            thumbnail_path = _write_thumbnail(out_path, thumb_png)
+            thumbnail_path = _write_thumbnail(subifd_path, thumb_png)
             print(f"thumbnail: {thumbnail_path}")
         except Exception as err:
             print(f"[warn] thumbnail generation failed: {err}")
+
+    # Relocate levels SubIFD -> top-level IFD (and channels-first -> RGB) so the
+    # browser mosaic viewer can read the pyramid.
+    _repackage_as_ifd_pyramid(subifd_path, out_path,
+                              pixel_size_um=reader.metadata.pixel_size)
+    print("Done. Browser-ready mosaic written to:")
+    print(f"  {out_path}")
+
+    # Remove the intermediate (kept on failure above for debugging).
+    try:
+        os.remove(subifd_path)
+    except OSError as err:
+        print(f"[warn] could not remove intermediate {subifd_path}: {err}")
 
     return {
         "mosaic_path": out_path,

@@ -56,11 +56,22 @@ Developed here for AI-agent access; **deploys from its own repo** (GCP project *
 GKE Autopilot cluster `crucible-cluster`, Cloud Run/GKE).
 - `crucible_stitch_process.py` — Crucible-agnostic analysis: `main(directory)` globs
   `*_simple_tiled_image.h5`, ashlar (`EdgeAligner`/`Mosaic`/`PyramidWriter`) + BaSiC flat-field →
-  pyramidal **BigTIFF OME-TIFF** in `stitch_results/`; returns dict
+  pyramidal BigTIFF in `stitch_results/`; returns dict
   `{mosaic_path, thumbnail_path, source_h5, pixel_size_um, n_tiles, mosaic_shape,
   median_correction_px, max_correction_px}`. Writes a downsampled PNG thumbnail. **Requires a JVM**
   (ashlar → pyjnius starts one at import; JAVA_HOME must be set — Dockerfile installs
   `openjdk-21-jre-headless`).
+- ⚠ **Output format = IFD pyramid, not SubIFD.** ashlar's `PyramidWriter` writes the pyramid as
+  **SubIFDs** and every channel as a separate `minisblack` plane. Browser **geotiff.js (the viewer)
+  CANNOT traverse SubIFD pyramids** — it silently falls back to loading the full-res level only. So
+  `main()` writes ashlar's SubIFD OME-TIFF to an intermediate `*_mosaic_subifd.ome.tif`, then
+  `_repackage_as_ifd_pyramid()` rewrites it as the deliverable **`*_mosaic.tif`**: overviews become
+  reduced-resolution **top-level IFD pages** (`NewSubfileType=REDUCEDIMAGE`) and 3-channel data is
+  interleaved to **RGB** (photometric=rgb) for true color. Lossless (reuses ashlar's own levels,
+  same adobe_deflate+predictor); one level at a time to bound memory; pixel size → base-page
+  `XResolution`/`ResolutionUnit=cm`. Thumbnail is made from the intermediate (its `series.levels`),
+  then the intermediate is deleted. Grayscale path validated; **RGB path not yet validated on a real
+  color mosaic**.
 - `consumer-mosaic-stitcher.py` — RMQ consumer on queue **`mosaic-stitch`** (MUST match the API's
   publish `routing_key`). Per message `{dsid}`: download raw `.h5`, run `main()`, create child
   dataset (`measurement="stitched_mosaic"`), `link_parent_child(raw → mosaic)`, propagate samples,
@@ -84,9 +95,13 @@ Verify: `get_client().datasets.list_children('DATASET_ID')`. Logs: `kubectl logs
 
 ## Mosaic viewer (separate repo: `MolecularFoundryCrucible/crucible_graph_explorer`)
 "Mosaic Viewer" dataset view for `stitched_mosaic` datasets. **Method A (client-side):** browser
-reads the pyramidal OME-TIFF directly via HTTP Range with geotiff.js and renders with OpenSeadragon
-(server stays out of the data path). Files: `views/datasets/mosaic_viewer.py` (auto-discovered
-plugin: `MEASUREMENT_TYPES=['stitched_mosaic']`, view + `/file-url` signed-URL + `/local` dev route)
-and `flask_templates/dataset_views/mosaic_viewer.html`. `test_data/` holds local `.ome.tif` for the
-`/dataset-view/mosaic/local/<file>` dev route (same-origin, Range-capable). Detailed context lives in
-that repo. (Full viewer build in progress.)
+reads the pyramidal **IFD-overview** tiled TIFF directly via HTTP Range with **geotiff.js** and
+renders with **OpenSeadragon** (server stays out of the data path). Uses the
+**`geotiff-tilesource`** plugin (`OpenSeadragon.GeoTIFFTileSource.getAllTileSources(url, {hints:
+{layout:{pyramid:'auto'}}})`) + **OpenSeadragon 6** via CDN. Requires the IFD-pyramid output above
+(geotiff.js can't read SubIFDs — see the ⚠ note). Files: `views/datasets/mosaic_viewer.py`
+(auto-discovered plugin: `MEASUREMENT_TYPES=['stitched_mosaic']`, view + `/file-url` signed-URL +
+`/local` dev route) and `flask_templates/dataset_views/mosaic_viewer.html` (real OSD viewer built;
+loading/error states, extension point for future positional markers). `test_data/` holds local
+`.tif`/`.ome.tif` for the `/dataset-view/mosaic/local/<file>` dev route (same-origin, Range-capable).
+Detailed context lives in that repo.

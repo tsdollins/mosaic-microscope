@@ -79,11 +79,19 @@ def create_stitched_dataset(crucible_client, og_dataset, stitched):
     """Create (or update) the stitched-mosaic child dataset and link it to the raw.
 
     `stitched` is the dict returned by crucible_stitch_process.main().
+
+    Idempotent: if a stitched child already exists (a re-run), we UPDATE it in
+    place. datasets.create() 409s on an existing id ("use PATCH to update it"),
+    so reusing the id with create() is wrong -- we add the new file + refresh
+    metadata instead. Files dedup by SHA256 server-side, so re-uploading an
+    identical mosaic is a no-op.
     """
     raw_mfid = og_dataset["unique_id"]
     mosaic_path = stitched["mosaic_path"]
-
-    child_id = find_existing_stitched_child(crucible_client, raw_mfid) or mfid.mfid()[0]
+    child_name = f"stitched_{og_dataset['dataset_name']}"
+    timestamp = datetime.fromtimestamp(
+        os.path.getmtime(mosaic_path), tz=timezone.utc
+    ).isoformat()
 
     # Stitch QC + provenance -> child scientific metadata.
     scientific_metadata = {
@@ -95,50 +103,58 @@ def create_stitched_dataset(crucible_client, og_dataset, stitched):
         "max_correction_px": stitched["max_correction_px"],
     }
 
-    sds = Dataset(
-        unique_id=child_id,
-        dataset_name=f"stitched_{og_dataset['dataset_name']}",
-        instrument_name=og_dataset.get("instrument_name"),
-        measurement=STITCH_MEASUREMENT,
-        data_type=STITCH_MEASUREMENT,
-        project_id=og_dataset["project_id"],       # inherit the parent's project
-        owner_orcid=og_dataset.get("owner_orcid"),
-        session_name=og_dataset.get("session_name"),
-    )
-    sds.timestamp = datetime.fromtimestamp(
-        os.path.getmtime(mosaic_path), tz=timezone.utc
-    ).isoformat()
+    existing_child = find_existing_stitched_child(crucible_client, raw_mfid)
+    if existing_child:
+        child_id = existing_child
+        logger.info(f"stitched child {child_id} already exists; updating in place")
+        crucible_client.datasets.add_file_to_dataset(
+            child_id, mosaic_path, wait_for_ingestion_response=False)
+        crucible_client.datasets.replace_scientific_metadata(
+            child_id, scientific_metadata)
+        try:
+            crucible_client.datasets.update(child_id, timestamp=timestamp)
+        except Exception as err:
+            logger.warning(f"could not update timestamp on {child_id}: {err}")
+    else:
+        child_id = mfid.mfid()[0]
+        sds = Dataset(
+            unique_id=child_id,
+            dataset_name=child_name,
+            instrument_name=og_dataset.get("instrument_name"),
+            measurement=STITCH_MEASUREMENT,
+            data_type=STITCH_MEASUREMENT,
+            project_id=og_dataset["project_id"],   # inherit the parent's project
+            owner_orcid=og_dataset.get("owner_orcid"),
+            session_name=og_dataset.get("session_name"),
+        )
+        sds.timestamp = timestamp
+        crucible_client.datasets.create(
+            sds,
+            files_to_upload=[mosaic_path],
+            scientific_metadata=scientific_metadata,
+            wait_for_ingestion_response=False,
+        )
+        # Raw scan (parent) -> stitched mosaic (child)
+        crucible_client.datasets.link_parent_child(raw_mfid, child_id)
 
-    crucible_client.datasets.create(
-        sds,
-        files_to_upload=[mosaic_path],
-        scientific_metadata=scientific_metadata,
-        wait_for_ingestion_response=False,
-    )
-
-    # Raw scan (parent) -> stitched mosaic (child)
-    crucible_client.datasets.link_parent_child(raw_mfid, sds.unique_id)
-
-    # Propagate the parent's sample link(s) to the derived dataset.
+    # Propagate the parent's sample link(s) to the derived dataset (both paths).
     try:
         for sample in crucible_client.samples.list(dataset_id=raw_mfid):
-            crucible_client.samples.add_dataset(sample["unique_id"], sds.unique_id)
+            crucible_client.samples.add_dataset(sample["unique_id"], child_id)
     except Exception as err:
-        logger.warning(f"could not propagate samples to {sds.unique_id}: {err}")
+        logger.warning(f"could not propagate samples to {child_id}: {err}")
 
     # Attach the client-generated mosaic preview, if one was produced.
     thumbnail_path = stitched.get("thumbnail_path")
     if thumbnail_path:
         try:
             crucible_client.datasets.add_thumbnail(
-                sds.unique_id, thumbnail_path,
-                thumbnail_name=f"{sds.dataset_name}_thumb",
-            )
+                child_id, thumbnail_path, thumbnail_name=f"{child_name}_thumb")
         except Exception as err:
-            logger.warning(f"thumbnail upload failed for {sds.unique_id}: {err}")
+            logger.warning(f"thumbnail upload failed for {child_id}: {err}")
 
-    logger.info(f"stitched mosaic -> {sds.unique_id} (child of {raw_mfid})")
-    return sds.unique_id
+    logger.info(f"stitched mosaic -> {child_id} (child of {raw_mfid})")
+    return child_id
 
 
 def run_stitch(ch, method, body, connection):
