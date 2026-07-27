@@ -72,6 +72,17 @@ class SimpleTiledImage(PriorStage2DScan):
         a['panel_width_mm'] = app.settings['panel_width']
         a['panel_height_mm'] = app.settings['panel_height']
 
+        # Stage raster bounds (mm) + grid shape, from this measurement's own
+        # settings. These define the scan's stage bounding box, which the
+        # stitcher turns into a pixel<->stage affine so the mosaic viewer can
+        # place higher-mag mosaics as detail regions on a low-mag map.
+        a['h0'] = self.settings['h0']
+        a['h1'] = self.settings['h1']
+        a['v0'] = self.settings['v0']
+        a['v1'] = self.settings['v1']
+        a['Nh'] = self.settings['Nh']
+        a['Nv'] = self.settings['Nv']
+
         # Raw sensor pixel size (um) from the camera.
         pixel_size_um = app.hardware['zwo_camera'].settings['pixel_size_um']
         a['pixel_size_um'] = pixel_size_um

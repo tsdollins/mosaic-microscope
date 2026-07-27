@@ -116,6 +116,78 @@ def read_scan_geometry(f):
         "'panel_height' under 'app/settings'.")
 
 
+def read_stage_geometry(f):
+    """Return (h0, h1, v0, v1, Nh, Nv, magnification|None) from an open scan H5.
+
+    Prefers the explicit attrs written on the measurement group by
+    simple_tiled_image._save_scan_metadata(); falls back to that measurement's
+    own settings group (h0/h1/... are ScopeFoundry LQs) and to the turret
+    hardware settings for magnification, so older files still work. Returns None
+    for magnification if it is not recorded anywhere.
+    """
+    meas = f.get("measurement/simple_tiled_image")
+    settings = f.get("measurement/simple_tiled_image/settings")
+
+    def _get(key):
+        if meas is not None and key in meas.attrs:
+            return meas.attrs[key]
+        if settings is not None and key in settings.attrs:
+            return settings.attrs[key]
+        raise KeyError(key)
+
+    h0, h1 = float(_get("h0")), float(_get("h1"))
+    v0, v1 = float(_get("v0")), float(_get("v1"))
+    Nh, Nv = int(_get("Nh")), int(_get("Nv"))
+
+    mag = None
+    for grp, key in ((meas, "magnification"),
+                     (f.get("hardware/prior_turret/settings"), "magnification")):
+        if grp is not None and key in grp.attrs:
+            m = float(grp.attrs[key])
+            if m > 0:
+                mag = m
+                break
+
+    return h0, h1, v0, v1, Nh, Nv, mag
+
+
+def compute_mosaic_geometry(f, pixel_size_um, panel_w_mm, panel_h_mm):
+    """Build the pixel<->stage geometry the mosaic viewer uses to place a mosaic
+    as a detail region on another (lower-mag) mosaic.
+
+    Returns a dict:
+      stage_bbox_mm  : full image extent in stage mm {x_min,x_max,y_min,y_max}
+                       (tile-centre bbox from h0/h1/v0/v1 expanded by half a panel)
+      stage_origin_mm: stage (x,y) at image pixel (0,0) = the top-left corner
+      mm_per_px      : mosaic scale (pixel_size_um / 1000)
+      y_axis_up      : True -- larger stage y maps to a smaller pixel row (the
+                       Y-flip already baked into H5GridMetadata.tile_position)
+      magnification  : objective magnification, or None
+
+    Assumes the common raster orientation (col 0 at the smaller h, top image row
+    at the larger v). Approximate by design -- a half-tile/backlash error is what
+    the viewer's manual nudge corrects; validate the affine against a real file.
+    Returns None if stage geometry is unavailable.
+    """
+    try:
+        h0, h1, v0, v1, Nh, Nv, mag = read_stage_geometry(f)
+    except KeyError:
+        return None
+
+    half_w, half_h = panel_w_mm / 2.0, panel_h_mm / 2.0
+    x_min, x_max = min(h0, h1) - half_w, max(h0, h1) + half_w
+    y_min, y_max = min(v0, v1) - half_h, max(v0, v1) + half_h
+
+    return {
+        "stage_bbox_mm": {"x_min": x_min, "x_max": x_max,
+                          "y_min": y_min, "y_max": y_max},
+        "stage_origin_mm": {"x": x_min, "y": y_max},   # pixel (0,0), y-up
+        "mm_per_px": pixel_size_um / 1000.0,
+        "y_axis_up": True,
+        "magnification": mag,
+    }
+
+
 class H5GridReader(reg.Reader):
     def __init__(self, path, overlap=None, frame_w_mm=None, frame_h_mm=None):
         self.path = path
@@ -430,6 +502,16 @@ def main(directory="./"):
     except OSError as err:
         print(f"[warn] could not remove intermediate {subifd_path}: {err}")
 
+    # Pixel<->stage geometry so the viewer can place this mosaic as a detail
+    # region on a lower-mag mosaic of the same sample. Uses the panel (FOV) size
+    # the reader already read from the H5. None if stage bounds are unavailable.
+    _, frame_w_mm, frame_h_mm = read_scan_geometry(reader.f)
+    geometry = compute_mosaic_geometry(
+        reader.f, float(reader.metadata.pixel_size), frame_w_mm, frame_h_mm)
+    if geometry is None:
+        print("[warn] stage geometry unavailable; mosaic will not auto-place "
+              "as a detail region (older scan file without h0/h1/v0/v1).")
+
     return {
         "mosaic_path": out_path,
         "thumbnail_path": thumbnail_path,
@@ -439,6 +521,7 @@ def main(directory="./"):
         "mosaic_shape": [int(x) for x in aligner.mosaic_shape],
         "median_correction_px": median_correction,
         "max_correction_px": max_correction,
+        "geometry": geometry,
     }
 
 

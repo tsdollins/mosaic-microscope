@@ -103,6 +103,24 @@ def create_stitched_dataset(crucible_client, og_dataset, stitched):
         "max_correction_px": stitched["max_correction_px"],
     }
 
+    # Pixel<->stage geometry so the mosaic viewer can place this mosaic as a
+    # detail region on a lower-mag mosaic of the same sample (sample-grouped).
+    # `geometry` is None for older scans without stage bounds -- skip if so.
+    geometry = stitched.get("geometry")
+    if geometry:
+        scientific_metadata.update({
+            "magnification": geometry.get("magnification"),
+            "stage_bbox_mm": geometry["stage_bbox_mm"],
+            "stage_origin_mm": geometry["stage_origin_mm"],
+            "mm_per_px": geometry["mm_per_px"],
+            "y_axis_up": geometry["y_axis_up"],
+            # coord_frame ties mosaics sharing one stage coordinate system
+            # (same instrument + session). Used later to gate cross-session
+            # auto-placement; recorded now so no data migration is needed.
+            "coord_frame": (f"{og_dataset.get('instrument_name')}/"
+                            f"{og_dataset.get('session_name')}"),
+        })
+
     existing_child = find_existing_stitched_child(crucible_client, raw_mfid)
     if existing_child:
         child_id = existing_child
