@@ -165,17 +165,13 @@ class ZWOCameraCaptureMeasure(Measurement):
         if im is None:
             return
 
-        # Same orientation correction that is baked into the saved data, so the
-        # live view matches what gets stored/stitched.
+        # Same normalization that is baked into the saved data (orientation flips
+        # + BGR->RGB), so the live view matches what gets stored/stitched.
         im = self.app.hardware['zwo_camera'].orient_frame(im)
 
         stride = self.settings['px_bin']
         if stride > 1:
             im = im[::stride, ::stride]
-
-        # Some color cameras deliver BGR; swap to RGB for display
-        if im.ndim == 3 and im.shape[-1] == 3:
-            im = np.ascontiguousarray(im[:, :, ::-1])
 
         self.live_img_item.setImage(image=im, autoLevels=False)
         scale = 1

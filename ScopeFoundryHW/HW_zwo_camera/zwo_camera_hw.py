@@ -280,18 +280,26 @@ class ZWOCameraHW(HardwareComponent):
             return self.camera.capture_video_frame()
 
     def orient_frame(self, frame):
-        """Apply the configured orientation correction to a raw camera frame.
+        """Normalize a raw camera frame: orientation flips + color order.
 
         Used by BOTH the live preview and the scan data-writers so what you see
         live matches what is saved and later stitched. Flips the first two
-        (spatial) axes; any trailing color axis is preserved. Because this is
-        baked into the saved data, downstream scripts no longer flip tiles.
+        (spatial) axes per flip_h/flip_v, and converts the color channel order
+        from the SDK's native BGR to standard RGB. The ZWO ASI SDK delivers
+        RGB24 frames in B,G,R byte order (Windows/OpenCV convention); converting
+        here -- the single chokepoint -- means saved h5/tif/jpg data and the live
+        view are all standard RGB, so downstream tools (napari, stitching) get
+        correct colors without swapping. Non-color frames (RAW8/RAW16/Y8) have
+        no trailing 3-channel axis and are left in their original channel form.
         """
         S = self.settings
         if S['flip_v']:
             frame = frame[::-1]
         if S['flip_h']:
             frame = frame[:, ::-1]
+        # BGR -> RGB for 3-channel color frames only.
+        if frame.ndim == 3 and frame.shape[-1] == 3:
+            frame = frame[:, :, ::-1]
         return np.ascontiguousarray(frame)
 
     img_types = {

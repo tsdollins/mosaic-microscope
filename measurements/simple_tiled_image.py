@@ -47,6 +47,42 @@ class SimpleTiledImage(PriorStage2DScan):
         if pf is not None:
             pf.set_servo(True)
 
+        # Record explicit, co-located scan geometry so downstream tools
+        # (stitching, Crucible) don't cross-reference app/hardware groups or
+        # hardcode anything.
+        self._save_scan_metadata()
+
+    def _save_scan_metadata(self):
+        """Write explicit scan geometry as attrs on the measurement group.
+
+        Everything here is otherwise recoverable from app/hardware settings, but
+        co-locating it (and storing the derived per-image pixel size, which lives
+        nowhere else) means the stitcher and the Crucible ingestor can read one
+        group instead of recomputing. Stored as attrs because the Crucible H5
+        ingestor harvests attrs (not dataset values) into scientific_metadata.
+        """
+        if not self.settings['save_h5'] or not hasattr(self, 'h5_meas_group'):
+            return
+
+        app = self.app
+        a = self.h5_meas_group.attrs
+
+        # Scan-planning inputs (app-level settings). overlap is a percent.
+        a['overlap_frac'] = app.settings['overlap'] / 100.0
+        a['panel_width_mm'] = app.settings['panel_width']
+        a['panel_height_mm'] = app.settings['panel_height']
+
+        # Raw sensor pixel size (um) from the camera.
+        pixel_size_um = app.hardware['zwo_camera'].settings['pixel_size_um']
+        a['pixel_size_um'] = pixel_size_um
+
+        # Objective magnification + derived per-image pixel size, when available.
+        if 'prior_turret' in app.hardware:
+            mag = app.hardware['prior_turret'].settings['magnification']
+            if mag and mag > 0:
+                a['magnification'] = mag
+                a['pixel_size_um_effective'] = pixel_size_um / mag
+
     def post_scan_cleanup(self):
         cam = self.app.hardware['zwo_camera']
         cam.stop_video_capture()

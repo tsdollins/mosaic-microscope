@@ -169,8 +169,6 @@ class Timelapse(Measurement):
     def update_display(self):
         if self.display_frame is None:
             return
-        im = self.display_frame
-        # Some color cameras deliver BGR; swap to RGB for display.
-        if im.ndim == 3 and im.shape[-1] == 3:
-            im = np.ascontiguousarray(im[:, :, ::-1])
-        self.img_item.setImage(image=im, autoLevels=False)
+        # display_frame is already normalized (orientation + BGR->RGB) by
+        # cam.orient_frame() in run(), so no further channel swap is needed.
+        self.img_item.setImage(image=self.display_frame, autoLevels=False)
