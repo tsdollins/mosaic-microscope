@@ -30,8 +30,8 @@ class MicroscopeApp(BaseMicroscopeApp):
         from measurements.simple_tiled_image import SimpleTiledImage
         self.add_measurement(SimpleTiledImage(self))
 
-        from measurements.continuous_motion_image import ContinuousMotionImage
-        self.add_measurement(ContinuousMotionImage(self))
+        #from measurements.continuous_motion_image import ContinuousMotionImage
+        #self.add_measurement(ContinuousMotionImage(self))
 
         from measurements.timelapse import Timelapse
         self.add_measurement(Timelapse(self))
