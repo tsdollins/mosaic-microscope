@@ -145,6 +145,23 @@ class PriorStageDev:
         x, y = self._cmd("controller.stage.hostdirection.get").split()
         return int(x), int(y)
 
+    def set_joystick_direction(self, x_dir: int, y_dir: int):
+        """Set the physical +ve direction sign for joystick-driven moves (each +1
+        or -1). This is INDEPENDENT of set_host_direction (which only affects
+        positional/host moves and reported positions). The controller may reset
+        it on `controller.connect`, so (re)apply after connecting.
+        """
+        self._cmd(f"controller.stage.joystickdirection.set {int(x_dir)} {int(y_dir)}")
+
+    def get_joystick_direction(self) -> tuple[int, int]:
+        """Return the current (x, y) joystick direction signs, e.g. (1, 1) or (-1, -1)."""
+        x, y = self._cmd("controller.stage.joystickdirection.get").split()
+        return int(x), int(y)
+
+    def enable_joystick(self, on: bool = True):
+        """Enable (or disable) joystick control of the stage."""
+        self._cmd("controller.stage.joyxyz.on" if on else "controller.stage.joyxyz.off")
+
     # ------------------------------------------------------------------ #
     # Internal helpers                                                     #
     # ------------------------------------------------------------------ #

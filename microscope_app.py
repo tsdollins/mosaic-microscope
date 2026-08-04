@@ -36,8 +36,8 @@ class MicroscopeApp(BaseMicroscopeApp):
         from measurements.simple_tiled_image import SimpleTiledImage
         self.add_measurement(SimpleTiledImage(self))
 
-        from measurements.continuous_motion_image import ContinuousMotionImage
-        self.add_measurement(ContinuousMotionImage(self))
+        #from measurements.continuous_motion_image import ContinuousMotionImage
+        #self.add_measurement(ContinuousMotionImage(self))
 
         from measurements.timelapse import Timelapse
         self.add_measurement(Timelapse(self))
@@ -51,6 +51,10 @@ class MicroscopeApp(BaseMicroscopeApp):
                           spinbox_decimals=4, initial=2.695)
         self.settings.New("panel_width", dtype=float, ro=False, unit="mm",
                           spinbox_decimals=4, initial=2.695)
+        self.settings.New("center_h", dtype=float, ro=False, unit="mm",
+                                  spinbox_decimals=4, initial=0)
+        self.settings.New("center_v", dtype=float, ro=False, unit="mm",
+                                  spinbox_decimals=4, initial=0)
 
         # Auto-update the tile field-of-view (panel_width/height) whenever the
         # objective changes or the camera ROI / pixel size changes.
@@ -139,6 +143,8 @@ class MicroscopeApp(BaseMicroscopeApp):
         self.settings.overlap.connect_to_widget(Q.overlap_doubleSpinBox)
         self.settings.panel_height.connect_to_widget(Q.panel_height_doubleSpinBox)
         self.settings.panel_width.connect_to_widget(Q.panel_width_doubleSpinBox)
+        self.settings.center_h.connect_to_widget(Q.center_h_doubleSpinBox)
+        self.settings.center_v.connect_to_widget(Q.center_v_doubleSpinBox)
         Q.calculate_pushButton.clicked.connect(self.new_bounds)
 
         # --- Locate XY and Locate Tile ---
@@ -159,6 +165,8 @@ class MicroscopeApp(BaseMicroscopeApp):
         overlap = self.settings['overlap'] / 100
         h = self.settings['panel_height']
         w = self.settings['panel_width']
+        c_h = self.settings['center_h']
+        c_v = self.settings['center_v']
 
         for name in ('simple_tiled_image', 'continuous_motion_image'):  # scan measurement keys
             s = self.measurements[name].settings
@@ -172,10 +180,10 @@ class MicroscopeApp(BaseMicroscopeApp):
             Lh = (Nh - 1) * h * (1 - overlap)
             Lv = (Nv - 1) * w * (1 - overlap)
 
-            s.h0.update_value(-Lh / 2)
-            s.h1.update_value(Lh / 2)
-            s.v0.update_value(-Lv / 2)
-            s.v1.update_value(Lv / 2)
+            s.h0.update_value(-Lh / 2 + c_h)
+            s.h1.update_value(Lh / 2 + c_h)
+            s.v0.update_value(-Lv / 2 + c_v)
+            s.v1.update_value(Lv / 2 + c_v)
 
 
 def main():

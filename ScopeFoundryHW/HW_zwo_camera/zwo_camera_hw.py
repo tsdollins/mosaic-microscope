@@ -141,8 +141,9 @@ class ZWOCameraHW(HardwareComponent):
         
         S.img_type.connect_to_hardware(
             write_func = self.set_img_type)
-        
-        
+        S.img_type.write_to_hardware()
+
+
         self.controls = cam.get_controls()
 
         
@@ -199,6 +200,7 @@ class ZWOCameraHW(HardwareComponent):
                 lq.change_readonly(True)
         # Apply the configured ROI (auto-centered). width % 8 == 0, height % 2 == 0.
         self._apply_roi()
+
             
     def disconnect(self):
         self.settings.disconnect_all_from_hardware()

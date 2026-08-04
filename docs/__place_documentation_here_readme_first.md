@@ -24,3 +24,7 @@
 
  - *panel_width*: None
 
+ - *center_h*: None
+
+ - *center_v*: None
+

@@ -38,7 +38,8 @@ class SimpleTiledImage(PriorStage2DScan):
         cap = self.app.measurements['zwo_camera_capture']
         self._live_was_on = cap.settings['live_img']
         if self._live_was_on:
-            cap._stop_live_acquisition()
+            # Thread-safe: pauses preview on the GUI thread and unchecks live_img.
+            cap.set_live_preview(False)
         cam.start_video_capture()
 
         # Continuous-hold autofocus: enable the servo for the whole scan so the
@@ -99,7 +100,8 @@ class SimpleTiledImage(PriorStage2DScan):
         cam.stop_video_capture()
         cap = self.app.measurements['zwo_camera_capture']
         if getattr(self, '_live_was_on', False):
-            cap._start_live_acquisition()
+            # Thread-safe: resumes preview on the GUI thread and rechecks live_img.
+            cap.set_live_preview(True)
 
         pf = self._get_purefocus()
         if pf is not None:

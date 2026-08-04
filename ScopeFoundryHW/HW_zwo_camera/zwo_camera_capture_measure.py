@@ -55,6 +55,30 @@ class _CameraAcquisitionThread(QtCore.QThread):
                 break
 
 
+class _LivePreviewInvoker(QtCore.QObject):
+    """Marshals live-preview start/stop onto the GUI thread.
+
+    The preview acquisition QThread must be created/torn down -- and pyqtgraph
+    touched -- on the GUI thread. Scans run on a measurement thread, so starting
+    the acquisition thread from there does not actually deliver frames to the
+    display (the live view fails to resume after a scan). Scans instead call
+    ZWOCameraCaptureMeasure.set_live_preview(), which drives these slots via a
+    BlockingQueuedConnection so the work runs on the GUI thread.
+    """
+
+    def __init__(self, measure):
+        super().__init__()
+        self.measure = measure
+
+    @QtCore.Slot()
+    def start(self):
+        self.measure._apply_live_preview(True)
+
+    @QtCore.Slot()
+    def stop(self):
+        self.measure._apply_live_preview(False)
+
+
 class ZWOCameraCaptureMeasure(Measurement):
 
     name = 'zwo_camera_capture'
@@ -70,12 +94,21 @@ class ZWOCameraCaptureMeasure(Measurement):
         self.add_operation('clear_and_plot', self.clear_and_plot)
         self.add_operation('snap_and_save', self.snap_and_save)
         self.settings.live_img.add_listener(self.on_toggle_live_img)
+        # Guards against re-entering on_toggle_live_img when _apply_live_preview
+        # programmatically syncs the live_img checkbox.
+        self._suppress_toggle = False
 
         # Live-preview acquisition thread + drop-to-latest frame handoff
         self._acq_thread = None
         self._latest_frame = None
         self._display_pending = False
         self._frame_lock = threading.Lock()
+
+        # GUI-thread invoker: lets scans (running on a measurement thread) pause
+        # and resume the live preview via set_live_preview() without creating the
+        # acquisition QThread on the wrong thread. Created here in setup(), which
+        # runs on the GUI thread, so it carries GUI-thread affinity.
+        self._gui_invoker = _LivePreviewInvoker(self)
 
         # Stop the acquisition thread if the camera is disconnected out from under us
         self.app.hardware['zwo_camera'].settings.connected.add_listener(
@@ -110,10 +143,46 @@ class ZWOCameraCaptureMeasure(Measurement):
         self.clear_and_plot()
 
     def on_toggle_live_img(self):
-        if self.settings['live_img']:
+        # Checkbox-driven path (already on the GUI thread). Skip when we are
+        # programmatically syncing the checkbox from _apply_live_preview.
+        if self._suppress_toggle:
+            return
+        self._apply_live_preview(self.settings['live_img'])
+
+    def set_live_preview(self, enabled):
+        """Thread-safe entry point to turn the live preview on/off.
+
+        Keeps the live_img checkbox in sync and guarantees the acquisition
+        thread + pyqtgraph work happen on the GUI thread. Call this from scans
+        (measurement thread) instead of _start/_stop_live_acquisition: it
+        marshals to the GUI thread and blocks until the change is applied, so the
+        preview reliably resumes after a scan and the checkbox reflects reality.
+        """
+        if QtCore.QThread.currentThread() is self._gui_invoker.thread():
+            self._apply_live_preview(enabled)
+        else:
+            QtCore.QMetaObject.invokeMethod(
+                self._gui_invoker,
+                "start" if enabled else "stop",
+                QtCore.Qt.ConnectionType.BlockingQueuedConnection)
+
+    def _apply_live_preview(self, enabled):
+        """GUI-thread worker: start/stop acquisition and sync the checkbox.
+
+        Must run on the GUI thread -- use set_live_preview() from other threads.
+        """
+        if enabled:
             self._start_live_acquisition()
         else:
             self._stop_live_acquisition()
+        # Keep the checkbox consistent with the actual state, without recursing
+        # back into on_toggle_live_img (which would re-run start/stop).
+        if bool(self.settings['live_img']) != bool(enabled):
+            self._suppress_toggle = True
+            try:
+                self.settings['live_img'] = enabled
+            finally:
+                self._suppress_toggle = False
 
     def _start_live_acquisition(self):
         """Begin video capture and spin up the off-GUI-thread frame grabber."""
@@ -144,6 +213,13 @@ class ZWOCameraCaptureMeasure(Measurement):
                 cam.stop_video_capture()
             except Exception:
                 pass
+
+        # Reset the drop-to-latest handshake so a resumed preview isn't wedged by
+        # a stale _display_pending=True (which would make the new acquisition
+        # thread never emit frame_ready -> display never refreshes).
+        with self._frame_lock:
+            self._latest_frame = None
+            self._display_pending = False
 
     def _on_camera_connection_changed(self):
         """If the camera disconnects, tear down the grabber thread first so it

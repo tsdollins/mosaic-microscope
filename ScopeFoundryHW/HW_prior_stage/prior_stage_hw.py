@@ -16,6 +16,14 @@ class PriorStageHW(HardwareComponent):
         self.settings.New("invert_x", dtype=bool, initial=True,
                           description="Invert stage X sign so +X moves right "
                                       "(applies controller hostdirection after connect)")
+        self.settings.New("joystick_invert_x", dtype=bool, initial=True,
+                          description="Flip joystick X so the sample tracks the "
+                                      "stick intuitively in the camera "
+                                      "(applies controller joystickdirection after connect)")
+        self.settings.New("joystick_invert_y", dtype=bool, initial=True,
+                          description="Flip joystick Y so the sample tracks the "
+                                      "stick intuitively in the camera "
+                                      "(applies controller joystickdirection after connect)")
         self.settings.New("x_position", dtype=float, ro=True, unit="mm",
                           spinbox_decimals=4)
         self.settings.New("y_position", dtype=float, ro=True, unit="mm",
@@ -37,6 +45,10 @@ class PriorStageHW(HardwareComponent):
         self.add_operation("Halt XY", self.halt_xy)
 
         self.settings.invert_x.add_listener(self._on_invert_x)
+        self.settings.joystick_invert_x.add_listener(self._on_joystick_invert)
+        self.settings.joystick_invert_y.add_listener(self._on_joystick_invert)
+
+        self._was_busy = False
 
         self.update_timer = QtCore.QTimer()
         self.update_timer.timeout.connect(self._on_update_timer)
@@ -56,6 +68,11 @@ class PriorStageHW(HardwareComponent):
         # connect() reset hostdirection to default (1 1); apply invert_x now, so
         # the position reads below already carry the intended X sign.
         self._apply_host_direction()
+
+        # Enable the joystick and apply its direction. joystickdirection is
+        # independent of hostdirection and may also be reset by connect().
+        self.dev.enable_joystick(True)
+        self._apply_joystick_direction()
 
         self.settings.x_position.connect_to_hardware(
             read_func=lambda: self.dev.get_position()[0] / 1000.0)
@@ -110,6 +127,35 @@ class PriorStageHW(HardwareComponent):
         self.settings["x_target"] = self.settings["x_position"]
         self.settings["y_target"] = self.settings["y_position"]
 
+    def _apply_joystick_direction(self):
+        """Push the joystick_invert_x/y settings to the controller. Independent of
+        hostdirection; must be (re)applied after connect."""
+        x_dir = -1 if self.settings["joystick_invert_x"] else 1
+        y_dir = -1 if self.settings["joystick_invert_y"] else 1
+        self.dev.set_joystick_direction(x_dir, y_dir)
+
+    def _on_joystick_invert(self):
+        """Re-apply joystick direction live when a joystick_invert setting changes."""
+        if not self.settings["connected"]:
+            return
+        self._apply_joystick_direction()
+
+    def jog_xy(self, dx_mm: float, dy_mm: float):
+        """Nudge the stage by (dx, dy) mm *relative to its live physical position*.
+
+        Uses move-relative so a nudge always steps from wherever the stage
+        actually is (including after joystick moves) and never depends on a
+        possibly-stale absolute target. The target readouts are refreshed for
+        display only (no second move)."""
+        self.dev.move_relative(dx_mm * 1000, dy_mm * 1000, wait=False)
+        self.settings.x_target.update_value(
+            self.settings["x_position"] + dx_mm, update_hardware=False)
+        self.settings.y_target.update_value(
+            self.settings["y_position"] + dy_mm, update_hardware=False)
+
+    def _scan_running(self) -> bool:
+        return any(m.is_measuring() for m in self.app.measurements.values())
+
     def halt_xy(self):
         self.dev.stop()
 
@@ -124,9 +170,28 @@ class PriorStageHW(HardwareComponent):
     # ------------------------------------------------------------------ #
 
     def _on_update_timer(self):
-        if self.settings["connected"]:
-            self.settings.x_position.read_from_hardware()
-            self.settings.y_position.read_from_hardware()
+        if not self.settings["connected"]:
+            return
+        self.settings.x_position.read_from_hardware()
+        self.settings.y_position.read_from_hardware()
+
+        # A scan drives the targets itself and relies on target-based holding;
+        # leave targets alone and keep the SDK call pattern as before.
+        if self._scan_running():
+            self._was_busy = True
+            return
+
+        # Once motion settles (joystick or app move), snap the targets to the
+        # live position so a later absolute move doesn't fling the un-changed
+        # axis to a stale target. Edge-triggered only, so it never overwrites a
+        # target the user is currently typing into a connected spinbox.
+        busy = self.is_busy_xy()
+        if self._was_busy and not busy:
+            self.settings.x_target.update_value(
+                self.settings["x_position"], update_hardware=False)
+            self.settings.y_target.update_value(
+                self.settings["y_position"], update_hardware=False)
+        self._was_busy = busy
 
     # --- Locate functions ---
 

@@ -80,17 +80,13 @@ class PriorStageControlMeasure(Measurement):
     # ------------------------------------------------------------------ #
 
     def x_up(self):
-        self.stage.settings["x_target"] = (
-            self.stage.settings["x_position"] + self.settings["jog_step_xy"])
+        self.stage.jog_xy(+self.settings["jog_step_xy"], 0)
 
     def x_down(self):
-        self.stage.settings["x_target"] = (
-            self.stage.settings["x_position"] - self.settings["jog_step_xy"])
+        self.stage.jog_xy(-self.settings["jog_step_xy"], 0)
 
     def y_up(self):
-        self.stage.settings["y_target"] = (
-            self.stage.settings["y_position"] + self.settings["jog_step_xy"])
+        self.stage.jog_xy(0, +self.settings["jog_step_xy"])
 
     def y_down(self):
-        self.stage.settings["y_target"] = (
-            self.stage.settings["y_position"] - self.settings["jog_step_xy"])
+        self.stage.jog_xy(0, -self.settings["jog_step_xy"])
