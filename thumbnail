@@ -1,0 +1,46 @@
+def get_thumbnails(self):
+        tile_px = 64
+        TILED_DSET = "measurement/simple_tiled_image/live_img_map"
+        with h5py.File(self.file_to_upload, 'r') as h5file:
+
+            if TILED_DSET not in h5file:
+                return None
+            imgs = h5file[TILED_DSET]
+            shape = imgs.shape
+            if len(shape) == 6:
+                _, Nv, Nh, th, tw, _nc = shape
+                rgb = (_nc == 3)
+            elif len(shape) == 5:
+                _, Nv, Nh, th, tw = shape
+                rgb = False
+            else:
+                return None
+
+            # Stride each tile down to ~tile_px on its short edge.
+            step = max(1, min(th, tw) // tile_px)
+            cell_h = len(range(0, th, step))
+            cell_w = len(range(0, tw, step))
+
+            if rgb:
+                montage = np.zeros((Nv * cell_h, Nh * cell_w, 3), dtype=np.uint8)
+            else:
+                montage = np.zeros((Nv * cell_h, Nh * cell_w), dtype=np.uint8)
+
+            for r in range(Nv):
+                for c in range(Nh):
+                    if rgb:
+                        tile = np.asarray(imgs[0, r, c, ::step, ::step, :])
+                    else:
+                        tile = np.asarray(imgs[0, r, c, ::step, ::step])
+
+                    if tile.dtype != np.uint8:
+                        tmax = float(tile.max()) or 1.0
+                        tile = (tile.astype(np.float32) / tmax * 255).astype(np.uint8)
+                        
+                    mr = Nv - 1 - r
+                    h = min(cell_h, tile.shape[0])
+                    w = min(cell_w, tile.shape[1])
+                    montage[mr * cell_h:mr * cell_h + h,
+                            c * cell_w:c * cell_w + w] = tile[:h, :w]
+
+        self.add_thumbnail(Image.fromarray(montage), "Preview Image")
