@@ -128,6 +128,52 @@ class PriorStageDev:
         self._cmd("controller.nosepiece.home")
 
     # ------------------------------------------------------------------ #
+    # Filter wheel(s) (same controller session)                           #
+    #                                                                     #
+    # The controller can host up to 6 filter wheels, each addressed by a  #
+    # filter id `f` in [1..6]. The HF108FC reports as filter id 1 by      #
+    # default.                                                            #
+    # ------------------------------------------------------------------ #
+
+    def filter_fitted(self, f: int = 1) -> bool:
+        """True if filter wheel `f` is present on the controller."""
+        return self._cmd(f"controller.filter.fitted.get {int(f)}") != "0"
+
+    def get_filter_name(self, f: int = 1) -> str:
+        """Model name of filter wheel `f`, e.g. 'HF108-8'."""
+        return self._cmd(f"controller.filter.name.get {int(f)}")
+
+    def get_filters_per_wheel(self, f: int = 1) -> int:
+        """Number of filter slots on wheel `f`.
+
+        The SDK docs spell this command both 'filters-per-wheel' and
+        'filter-per-wheel' in different places, so try the documented form
+        first and fall back to the alternate spelling.
+        """
+        try:
+            return int(self._cmd(f"controller.filter.filters-per-wheel.get {int(f)}"))
+        except PriorStageError:
+            return int(self._cmd(f"controller.filter.filter-per-wheel.get {int(f)}"))
+
+    def get_filter_position(self, f: int = 1) -> int:
+        """Currently selected filter slot (1-based) on wheel `f`."""
+        return int(self._cmd(f"controller.filter.position.get {int(f)}"))
+
+    def goto_filter_position(self, position: int, f: int = 1, wait: bool = True):
+        """Rotate wheel `f` to filter slot `position` (1-based)."""
+        self._cmd(f"controller.filter.goto-position {int(f)} {int(position)}")
+        if wait:
+            while self.is_filter_busy(f):
+                time.sleep(_POLL_INTERVAL)
+
+    def is_filter_busy(self, f: int = 1) -> bool:
+        return self._cmd(f"controller.filter.busy.get {int(f)}") != "0"
+
+    def filter_home(self, f: int = 1):
+        """Home wheel `f`; it spins to find its alignment and ends at slot 1."""
+        self._cmd(f"controller.filter.home {int(f)}")
+
+    # ------------------------------------------------------------------ #
     # Axis direction                                                      #
     # ------------------------------------------------------------------ #
 

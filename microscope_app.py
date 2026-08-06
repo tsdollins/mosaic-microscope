@@ -15,6 +15,9 @@ class MicroscopeApp(BaseMicroscopeApp):
         from ScopeFoundryHW.HW_prior_turret.prior_turret_hw import PriorTurretHW
         self.add_hardware(PriorTurretHW(self))
 
+        from ScopeFoundryHW.HW_prior_filter.prior_filter_hw import PriorFilterHW
+        self.add_hardware(PriorFilterHW(self))
+
         from ScopeFoundryHW.HW_prior_purefocus.purefocus_hw import PureFocusHW
         self.add_hardware(PureFocusHW(self))
 
