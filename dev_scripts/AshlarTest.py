@@ -13,20 +13,20 @@ import numpy as np
 from scipy.ndimage import rotate
 from ashlar import reg
 
-H5_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\260626_150943_simple_tiled_image_flat.h5"
-OUT_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\mosaicC.ome.tif"
+H5_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\260630_165349_simple_tiled_image_flat.h5"
+OUT_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\mosaic20100rot175.ome.tif"
 
 # --- Known quantities ---
-OVERLAP = 0.15                 # 15% overlap between adjacent frames
-FRAME_W_MM = 2.695            # physical width  of one frame (H axis) in mm  <-- set this
-FRAME_H_MM = 2.695            # physical height of one frame (V axis) in mm  <-- set this
+OVERLAP = 0.20                 # 15% overlap between adjacent frames
+FRAME_W_MM = 0.6738            # physical width  of one frame (H axis) in mm  <-- set this
+FRAME_H_MM = 0.6738            # physical height of one frame (V axis) in mm  <-- set this
 
 ALIGN_CHANNEL = 1             # which channel to align on (0=R, 1=G, 2=B); G is usually sharpest
 
 # Known camera-vs-stage rotation. ashlar has no rotation model, so we de-rotate
 # each tile in the reader before alignment. Use the angle that made features line
 # up in MosaicViewer.py (negate if alignment gets worse). 0 disables correction.
-ROTATION_CORRECTION_DEG = -1.0
+ROTATION_CORRECTION_DEG = -1.75
 
 
 class H5GridMetadata(reg.Metadata):

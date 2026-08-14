@@ -3,7 +3,7 @@ import numpy as np
 import napari
 from scipy.ndimage import rotate
 
-H5_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\260626_150943_simple_tiled_image_flat.h5"
+H5_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\flake_test\260807_100211_simple_tiled_image.h5"
 
 # --- Rotation correction ---------------------------------------------------
 # The camera is mounted rotated relative to the stage. Each captured tile is
@@ -11,7 +11,7 @@ H5_PATH = r"C:\Users\Lab\Documents\NewMicroscopeApp\data\260626_150943_simple_ti
 # features fail to line up across tiles. We correct by rotating EACH tile about
 # its own center by this angle, keeping the tile the same size and grid position
 # (only the content is de-rotated). If features line up worse, negate the angle.
-ROTATION_CORRECTION_DEG = 1.0
+ROTATION_CORRECTION_DEG = 0.0
 SHOW_RAW = True            # show the uncorrected mosaic
 SHOW_CORRECTED = False      # show the per-tile rotation-corrected mosaic
 
@@ -21,8 +21,8 @@ SHOW_CORRECTED = False      # show the per-tile rotation-corrected mosaic
 #            fraction and feather-blended across the overlaps. Previews what an
 #            un-ashlar-aligned (nominal-position) stitch should look like.
 MODE = "abut"
-OVERLAP = 0.15      # fraction of a tile that overlaps its neighbor (overlap mode)
-FEATHER = False      # blend overlaps with a tapered weight (overlap mode)
+OVERLAP = 0.20      # fraction of a tile that overlaps its neighbor (overlap mode)
+FEATHER = True      # blend overlaps with a tapered weight (overlap mode)
 # ---------------------------------------------------------------------------
 
 
